@@ -18,7 +18,6 @@ class StoreGroupsRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'max:1000'],
-            'creator_id' => ['required', 'integer'],
             'is_public' => ['required', 'boolean'],
             'invitation_code' => ['nullable', 'string', 'max:10'],
             'max_members' => ['required', 'integer', 'min:2'],

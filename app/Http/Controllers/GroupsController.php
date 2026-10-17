@@ -60,19 +60,23 @@ class GroupsController extends Controller
     }*/
     public function store(StoreGroupsRequest $request)
     {
-        return new GroupsResource(Groups::create($request->all()));
+        $data = $request->all();
+        $data['creator_id'] = auth()->id();
+
+        return new GroupsResource(Groups::create($data));
     }
 
     public function insertFirt(StoreGroupsRequest $request)
     {
+        $creatorId = auth()->id();
 
-        DB::transaction(function () use ($request) {
+        DB::transaction(function () use ($request, $creatorId) {
 
             $group = new Groups;
             $group->tournament_id = $request->get('tournament_id');
             $group->name = $request->get('name');
             $group->description = $request->get('description');
-            $group->creator_id = $request->get('creator_id');
+            $group->creator_id = $creatorId;
             $group->is_public = $request->get('is_public');
             $group->invitation_code = Str::upper(Str::random(7));
             $group->max_members = $request->get('max_members');
@@ -97,7 +101,7 @@ class GroupsController extends Controller
             $member = new GroupMembers;
             //    $member->group_id = $lastInsertedId;
             $member->groups()->associate($group);
-            $member->user_id = $request->get('creator_id');
+            $member->user_id = $creatorId;
             $member->joined_at = Carbon::now();
             $member->is_admin = $request->get('is_admin') ?? 1;
             $member->save();
@@ -193,7 +197,7 @@ class GroupsController extends Controller
             }
         }
 
-        $group->update($request->all());
+        $group->update($request->except('creator_id'));
 
         return new GroupsResource($group->fresh());
     }

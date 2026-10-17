@@ -28,7 +28,6 @@ class UpdateGroupsRequest extends FormRequest
             return [
                 'name' => ['required'],
                 'description' => ['required'],
-                'creator_id' => ['required'],
                 'is_public' => ['required'],
                 'invitation_code' => ['nullable'],
                 'max_members' => ['required'],
@@ -52,7 +51,6 @@ class UpdateGroupsRequest extends FormRequest
             return [
                 'name' => ['sometimes', 'required'],
                 'description' => ['sometimes', 'required'],
-                'creator_id' => ['sometimes', 'required'],
                 'is_public' => ['sometimes', 'required'],
                 'invitation_code' => ['sometimes', 'nullable'],
                 'max_members' => ['sometimes', 'required'],

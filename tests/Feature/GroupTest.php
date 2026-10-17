@@ -85,6 +85,72 @@ class GroupTest extends TestCase
         $response->assertStatus(401);
     }
 
+    public function test_store_group_without_creator_id_uses_authenticated_user(): void
+    {
+        $user = $this->createUser();
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/v1/group', [
+            'name' => 'No Creator Id Sent',
+            'description' => 'Reproduce bug: creator_id field is required',
+            'is_public' => true,
+            'max_members' => 10,
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('groups', [
+            'name' => 'No Creator Id Sent',
+            'creator_id' => $user->user_id,
+        ]);
+    }
+
+    public function test_store_group_cannot_spoof_creator_id(): void
+    {
+        $user = $this->createUser();
+        $other = $this->createUser('other@example.com');
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/v1/group', [
+            'name' => 'Spoofed Owner',
+            'description' => 'desc',
+            'creator_id' => $other->user_id,
+            'is_public' => true,
+            'max_members' => 10,
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('groups', [
+            'name' => 'Spoofed Owner',
+            'creator_id' => $user->user_id,
+        ]);
+    }
+
+    public function test_insert_first_creates_group_and_admin_membership_without_creator_id(): void
+    {
+        $user = $this->createUser();
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/v1/group/first', [
+            'name' => 'My First Group',
+            'description' => 'Best group ever',
+            'is_public' => '1',
+            'max_members' => '20',
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('groups', [
+            'name' => 'My First Group',
+            'creator_id' => $user->user_id,
+        ]);
+
+        $group = Groups::where('name', 'My First Group')->first();
+        $this->assertDatabaseHas('groupmembers', [
+            'group_id' => $group->group_id,
+            'user_id' => $user->user_id,
+            'is_admin' => 1,
+        ]);
+    }
+
     public function test_update_group(): void
     {
         $user = $this->createUser();
