@@ -36,6 +36,40 @@ class TournamentController extends Controller
     }
 
     /**
+     * Torneos públicos que el usuario puede elegir hoy (16/10/2026, pedido
+     * del usuario) — camino 1 del onboarding ("elegir torneo configurado").
+     * Temporada = `active` (ya existente, sin campo nuevo). Plan = filtra
+     * por `league_category` (poblado por los comandos de sync) contra
+     * `getTierLimits()['external_leagues']`. Los torneos demo/privados
+     * (`league_category` null) quedan siempre visibles para cualquiera.
+     */
+    public function availableForMe(Request $request)
+    {
+        $user = $request->user();
+        $allowedLeagues = $user->getTierLimits()['external_leagues'];
+        $unlocksAll = in_array('all', $allowedLeagues, true);
+        // 'conmebol'/'sudamericana'/'south_america' en getTierLimits() son
+        // sinónimos del único valor real que persisten los comandos de sync.
+        $unlocksConmebol = $unlocksAll || array_intersect(
+            ['conmebol', 'sudamericana', 'south_america'],
+            $allowedLeagues
+        ) !== [];
+
+        $query = Tournament::where('active', true);
+
+        if (! $unlocksAll) {
+            $query->where(function ($q) use ($unlocksConmebol) {
+                $q->whereNull('league_category');
+                if ($unlocksConmebol) {
+                    $q->orWhere('league_category', 'conmebol');
+                }
+            });
+        }
+
+        return new TournamentCollection($query->paginate()->appends($request->query()));
+    }
+
+    /**
      * Show the form for creating a new resource.
      */
     public function create()

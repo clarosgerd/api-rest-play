@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\GroupMembers;
+use App\Models\Groups;
 use App\Models\Matches;
 use App\Models\Player;
 use App\Models\Team;
@@ -13,6 +15,63 @@ use Illuminate\Support\Facades\Artisan;
 
 class SyncController extends Controller
 {
+    /**
+     * Sync manual por el dueño de SU torneo público (16/10/2026, pedido del
+     * usuario) — a diferencia de sync()/status() (admin-only), esto lo
+     * puede disparar el dueño de un grupo ligado a este torneo, no solo un
+     * admin global. Mismo patrón de autorización que
+     * ManualMatchController::canManageResults().
+     */
+    public function syncTournament(Tournament $tournament): JsonResponse
+    {
+        if (! $this->canSyncTournament($tournament)) {
+            return response()->json(['message' => 'No tenés permiso para sincronizar este torneo.'], 403);
+        }
+
+        if (! $tournament->external_id || ! $tournament->league_category) {
+            return response()->json([
+                'message' => 'Este torneo no tiene una fuente externa configurada — usá el ingreso manual de resultados.',
+            ], 422);
+        }
+
+        $exitCode = match ($tournament->league_category) {
+            'conmebol' => Artisan::call('conmebol:sync', [
+                '--competition' => $tournament->external_id === 13 ? 'libertadores' : 'sudamericana',
+            ]),
+            'european' => Artisan::call('football:sync', [
+                '--competition' => (string) $tournament->external_id,
+                '--type' => 'matches',
+            ]),
+            default => 1,
+        };
+
+        return response()->json([
+            'success' => $exitCode === 0,
+            'message' => $exitCode === 0
+                ? "Sincronización de \"{$tournament->name}\" completada."
+                : 'La sincronización falló.',
+            'log' => Artisan::output(),
+        ]);
+    }
+
+    private function canSyncTournament(Tournament $tournament): bool
+    {
+        $userId = auth()->id();
+        $isAdmin = auth()->user()->role === 'admin';
+
+        if ($isAdmin || $tournament->created_by === $userId) {
+            return true;
+        }
+
+        $groupIds = Groups::where('tournament_id', $tournament->tournament_id)->pluck('group_id');
+
+        return GroupMembers::whereIn('group_id', $groupIds)
+            ->where('user_id', $userId)
+            ->where('is_admin', 1)
+            ->where('status', 'accepted')
+            ->exists();
+    }
+
     public function status(): JsonResponse
     {
         $tournaments = Tournament::count();

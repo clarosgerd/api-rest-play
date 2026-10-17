@@ -72,6 +72,18 @@ class Subscription extends Model
     public static function getPlans(): array
     {
         return [
+            // Predictor (16/10/2026) — plan barato de entrada para invitados
+            // que solo pronostican, no dueños de torneo/grupo.
+            'predictor' => [
+                'monthly' => [
+                    'price' => 1.99,
+                    'stripe_price_id' => env('STRIPE_PREDICTOR_MONTHLY_PRICE_ID'),
+                ],
+                'annual' => [
+                    'price' => 14.99,
+                    'stripe_price_id' => env('STRIPE_PREDICTOR_ANNUAL_PRICE_ID'),
+                ],
+            ],
             'pro' => [
                 'monthly' => [
                     'price' => 4.99,

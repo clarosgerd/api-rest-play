@@ -112,6 +112,18 @@ class User extends Authenticatable
         return $this->subscription_tier === 'premium' && $this->isSubscriptionActive();
     }
 
+    /**
+     * Suscripción "predictor" (16/10/2026, pedido del usuario) — pronosticar
+     * ahora exige CUALQUIER plan pago activo (predictor/pro/premium), ya no
+     * alcanza con free. Separado de isPro()/isPremium() porque esos 2 son
+     * exclusivos entre sí, mientras que este chequeo cubre a los 3.
+     */
+    public function hasPaidSubscription(): bool
+    {
+        return in_array($this->subscription_tier, ['predictor', 'pro', 'premium'], true)
+            && $this->isSubscriptionActive();
+    }
+
     public function isSubscriptionActive(): bool
     {
         if ($this->subscription_tier === 'free') {
@@ -128,6 +140,17 @@ class User extends Authenticatable
     public function getTierLimits(): array
     {
         return match ($this->subscription_tier) {
+            // Predictor (16/10/2026) — pensado para invitados que solo
+            // pronostican, no para dueños de torneo/grupo: no puede crear
+            // torneos propios ni ser dueño de un grupo (members_per_group=0
+            // no tiene sentido como "cupo del grupo que posee" porque no
+            // posee ninguno), predicciones ilimitadas porque es su único rol.
+            'predictor' => [
+                'tournaments' => 0,
+                'members_per_group' => 0,
+                'predictions_per_day' => -1,
+                'external_leagues' => [],
+            ],
             'pro' => [
                 'tournaments' => 5,
                 'members_per_group' => 50,

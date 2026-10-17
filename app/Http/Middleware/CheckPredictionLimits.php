@@ -18,6 +18,22 @@ class CheckPredictionLimits
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
+        // Suscripción paga obligatoria para pronosticar (16/10/2026, pedido
+        // del usuario) — free ya no alcanza, ni siquiera con el cap diario
+        // de abajo. Con predictor/pro/premium, predictions_per_day ya es
+        // -1/20/-1, así que nadie que pague queda limitado por el cap.
+        if (! $user->hasPaidSubscription()) {
+            return response()->json([
+                'message' => 'Necesitás una suscripción activa (Predictor, Pro o Premium) para pronosticar.',
+                // 'reason' distingue este caso de otros 403 de plan (ej.
+                // límite de torneos/miembros) para que el frontend pueda
+                // mostrar un copy distinto — ver ErrorBanner.tsx.
+                'reason' => 'subscription_required',
+                'current_tier' => $user->subscription_tier,
+                'upgrade_url' => '/api/v1/user/subscription/plans',
+            ], 403);
+        }
+
         $limits = $user->getTierLimits();
         $dailyLimit = $limits['predictions_per_day'];
 

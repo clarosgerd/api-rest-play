@@ -57,6 +57,17 @@ class SubscriptionController extends Controller
 
         return response()->json([
             'plans' => [
+                'predictor' => [
+                    'name' => 'Predictor',
+                    'features' => [
+                        'Unlimited predictions',
+                        'Compete in any group you\'re invited to',
+                        'No tournament/group ownership (invitee seat)',
+                    ],
+                    'monthly' => $plans['predictor']['monthly']['price'],
+                    'annual' => $plans['predictor']['annual']['price'],
+                    'annual_savings' => round(($plans['predictor']['monthly']['price'] * 12) - $plans['predictor']['annual']['price'], 2),
+                ],
                 'pro' => [
                     'name' => 'Pro',
                     'features' => [
@@ -95,7 +106,7 @@ class SubscriptionController extends Controller
     public function checkout(Request $request)
     {
         $validated = $request->validate([
-            'plan' => 'required|in:pro,premium',
+            'plan' => 'required|in:predictor,pro,premium',
             'billing' => 'required|in:monthly,annual',
         ]);
 

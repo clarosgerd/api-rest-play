@@ -39,6 +39,11 @@ Route::group(['prefix' => 'v1'], function () {
 
     // Public read-only endpoints
     Route::get('tournament', [TournamentController::class, 'index']);
+    // Torneos disponibles por plan+temporada (16/10/2026) — tiene que
+    // registrarse ANTES de la ruta con wildcard de abajo, si no Laravel
+    // intenta bindear "available-for-me" como un tournament_id y da 404.
+    Route::get('tournament/available-for-me', [TournamentController::class, 'availableForMe'])
+        ->middleware('auth:sanctum');
     Route::get('tournament/{tournament}', [TournamentController::class, 'show']);
     Route::get('team', [TeamController::class, 'index']);
     Route::get('team/{team}', [TeamController::class, 'show']);
@@ -130,6 +135,11 @@ Route::group(['prefix' => 'v1'], function () {
         Route::post('tournament/{tournament}/assign-manager', [TournamentController::class, 'assignManager']);
         Route::post('tournament/{tournament}/remove-manager', [TournamentController::class, 'removeManager']);
         Route::get('tournament/{tournament}/managers', [TournamentController::class, 'managers']);
+        // Sync manual por el dueño de su torneo público (16/10/2026) —
+        // autorización propia en el controller (dueño del torneo o
+        // admin-de-grupo ligado a él), no requiere el middleware 'admin'
+        // global que usa SyncController::sync().
+        Route::post('tournament/{tournament}/sync', [SyncController::class, 'syncTournament']);
 
         // Manual match results (owner only)
         Route::patch('tournament/{tournamentId}/match/{matchId}/result', [ManualMatchController::class, 'updateResult']);
@@ -206,8 +216,11 @@ Route::group(['prefix' => 'v1'], function () {
         Route::put('prediction/{prediction}', [PredictionsController::class, 'update']);
         Route::delete('prediction/{prediction}', [PredictionsController::class, 'destroy']);
 
-        // Group Predictions (write)
-        Route::post('groupprediction', [GroupPredictionsController::class, 'store']);
+        // Group Predictions (write) — mismo gate de suscripción que
+        // POST prediction (16/10/2026): sin esto, un usuario podía vincular
+        // una predicción ya creada a otro grupo sin pasar por ningún chequeo.
+        Route::post('groupprediction', [GroupPredictionsController::class, 'store'])
+            ->middleware('subscription.limits.predictions');
         Route::put('groupprediction/{groupprediction}', [GroupPredictionsController::class, 'update']);
         Route::delete('groupprediction/{groupprediction}', [GroupPredictionsController::class, 'destroy']);
 

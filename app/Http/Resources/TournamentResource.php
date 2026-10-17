@@ -29,6 +29,8 @@ class TournamentResource extends JsonResource
             'actived' => $this->active,
             'status' => $this->status ?? 'draft',
             'created_by' => $this->created_by,
+            'external_id' => $this->external_id,
+            'league_category' => $this->league_category,
             'is_promotional' => $this->is_promotional ?? false,
             'promotional_ends_at' => $this->promotional_ends_at,
             'is_currently_promotional' => $this->isCurrentlyPromotional(),

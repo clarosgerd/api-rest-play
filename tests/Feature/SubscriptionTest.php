@@ -85,6 +85,45 @@ class SubscriptionTest extends TestCase
         $this->assertEmpty($limits['external_leagues']);
     }
 
+    /** Predictor (16/10/2026) — plan barato para invitados, solo pronostica. */
+    public function test_predictor_plan_cannot_own_anything_but_predicts_unlimited(): void
+    {
+        $this->user->update(['subscription_tier' => 'predictor', 'subscription_expires_at' => now()->addMonth()]);
+
+        $limits = $this->user->getTierLimits();
+
+        $this->assertEquals(0, $limits['tournaments']);
+        $this->assertEquals(0, $limits['members_per_group']);
+        $this->assertEquals(-1, $limits['predictions_per_day']);
+    }
+
+    public function test_plans_endpoint_includes_predictor(): void
+    {
+        $response = $this->actingAs($this->user)
+            ->getJson('/api/v1/user/subscription/plans');
+
+        $response->assertOk()
+            ->assertJsonStructure(['plans' => ['predictor', 'pro', 'premium']])
+            ->assertJsonPath('plans.predictor.monthly', 1.99);
+    }
+
+    public function test_has_paid_subscription_is_false_for_free_true_for_paid_tiers(): void
+    {
+        $this->assertFalse($this->user->hasPaidSubscription());
+
+        foreach (['predictor', 'pro', 'premium'] as $tier) {
+            $this->user->update(['subscription_tier' => $tier, 'subscription_expires_at' => now()->addMonth()]);
+            $this->assertTrue($this->user->hasPaidSubscription());
+        }
+    }
+
+    public function test_has_paid_subscription_is_false_when_expired(): void
+    {
+        $this->user->update(['subscription_tier' => 'pro', 'subscription_expires_at' => now()->subDay()]);
+
+        $this->assertFalse($this->user->hasPaidSubscription());
+    }
+
     public function test_is_pro_returns_true_when_active(): void
     {
         $this->user->update([

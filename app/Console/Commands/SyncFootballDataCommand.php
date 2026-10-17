@@ -118,6 +118,10 @@ class SyncFootballDataCommand extends Command
                 'end_date' => $comp['currentSeason']['endDate'] ?? date('Y-m-d'),
                 'active' => true,
                 'external_id' => $comp['id'],
+                // Copa Libertadores (2152) viaja por football-data.org pero es
+                // CONMEBOL para el filtro de disponibilidad por plan — el resto
+                // de FREE_COMPETITIONS son ligas/torneos europeos reales.
+                'league_category' => (int) $comp['id'] === 2152 ? 'conmebol' : 'european',
                 'last_synced_at' => $now,
             ];
 

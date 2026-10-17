@@ -257,6 +257,7 @@ class SyncConmebolCommand extends Command
             'end_date' => $season.'-12-31',
             'active' => true,
             'external_id' => $externalId,
+            'league_category' => 'conmebol',
             'last_synced_at' => now(),
         ];
 

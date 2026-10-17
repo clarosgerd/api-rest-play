@@ -35,6 +35,11 @@ class PredictionTest extends TestCase
             'last_name' => 'Doe',
             'email' => 'john@example.com',
             'password_hash' => bcrypt('secret123'),
+            // Pronosticar exige suscripción paga desde el 16/10/2026 — este
+            // test ejercita las reglas de PredictionsController (duplicado,
+            // cutoff, partido finalizado), no el gate de suscripción nuevo
+            // (ver PredictionSubscriptionGateTest para ese caso).
+            'subscription_tier' => 'pro',
         ]);
 
         $home = Team::create([

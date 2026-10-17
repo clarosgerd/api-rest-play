@@ -29,6 +29,7 @@ class Tournament extends Model
         'status',
         'created_by',
         'external_id',
+        'league_category',
         'last_synced_at',
         'is_promotional',
         'promotional_tier_required',
