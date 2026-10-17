@@ -118,11 +118,22 @@ class EloService
             ['team_id' => $homeTeamId, 'tournament_id' => $homeTournamentId, 'rating' => $homeNew],
             ['team_id' => $awayTeamId, 'tournament_id' => $awayTournamentId, 'rating' => $awayNew],
         ] as $entry) {
+            // Bug real encontrado al agregar tests (16/10/2026): DB::raw('matches_played + 1')
+            // como VALUE de un updateOrInsert() solo tiene sentido en la rama UPDATE — en la
+            // rama INSERT (equipo sin fila todavía) se convierte en un INSERT ... VALUES
+            // (matches_played + 1), que no es SQL válido en ningún motor (sqlite ni MySQL):
+            // "matches_played" no existe como columna referenciable en un INSERT. Se
+            // incrementa en PHP en su lugar.
+            $previousCount = DB::table('team_elo_ratings')
+                ->where('team_id', $entry['team_id'])
+                ->where('tournament_id', $entry['tournament_id'])
+                ->value('matches_played') ?? 0;
+
             DB::table('team_elo_ratings')->updateOrInsert(
                 ['team_id' => $entry['team_id'], 'tournament_id' => $entry['tournament_id']],
                 [
                     'elo_rating' => $entry['rating'],
-                    'matches_played' => DB::raw('matches_played + 1'),
+                    'matches_played' => $previousCount + 1,
                     'last_match_date' => $date,
                     'updated_at' => Carbon::now(),
                 ]
