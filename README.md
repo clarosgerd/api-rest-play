@@ -1,61 +1,96 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Friend Soccer API
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Backend en Laravel de **Friend Soccer**, una plataforma de pronósticos deportivos: torneos y copas
+reales (sincronizados desde football-data.org, ESPN y API-Football) y privados, grupos de
+pronosticadores con tabla de posiciones y pool de premios, un competidor de IA ("Franco") y
+suscripciones de pago.
 
-## About Laravel
+Frontend (React): [front-end-soccer](https://github.com/clarosgerd/front-end-soccer).
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Qué incluye
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+- **Torneos y grupos**: torneos públicos (sincronizados) o privados, con fases/bracket, grupos de
+  pronosticadores con scoring configurable y pool de premios 1°/2°/3°.
+- **Predicciones y Franco (IA)**: motor de predicción (Poisson + Elo + Elo histórico de un dataset de
+  Kaggle + forma + head-to-head + momentum, con ajustes específicos para CONMEBOL) que compite como un
+  participante más dentro de los grupos.
+- **Suscripciones**: planes Predictor / Pro / Premium, cobrados en Bolivianos vía **SIP** (QR bancario,
+  ver `app/Services/SipService.php`). Stripe queda integrado pero sin uso activo (se dejó por si se
+  retoma para USD/tarjeta internacional).
+- **Panel de soporte (super admin)**: gestión de usuarios, confirmación manual de pagos SIP pendientes, y
+  [Laravel Telescope](https://laravel.com/docs/telescope) para ver requests/excepciones/jobs fallidos sin
+  entrar por SSH — todo detrás del rol `role = 'admin'`.
+- **Sync de datos deportivos**: comandos Artisan que traen equipos/partidos/jugadores/posiciones desde
+  football-data.org, ESPN, API-Football y CONMEBOL (`app/Console/Commands/Sync*.php`).
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Requisitos
 
-## Learning Laravel
+- PHP 8.2+
+- Composer
+- MySQL (o SQLite para tests — ver `phpunit.xml`)
+- Un worker de colas (`QUEUE_CONNECTION=database`) para que salgan los correos (bienvenida, invitación a
+  grupo, etc.)
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## Instalación
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+```bash
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate --seed   # crea admin@demo.com / password (role=admin)
+php artisan serve
+```
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+En otra terminal, para que los correos encolados se envíen de verdad:
 
-## Laravel Sponsors
+```bash
+php artisan queue:work
+```
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## Variables de entorno
 
-### Premium Partners
+Además de las estándar de Laravel (`DB_*`, `MAIL_*`, `QUEUE_CONNECTION=database`), esta app usa:
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development/)**
-- **[Active Logic](https://activelogic.com)**
+| Variable | Para qué |
+|---|---|
+| `FOOTBALL_DATA_API_TOKEN` | Sync de ligas/torneos vía football-data.org |
+| `THESPORTSDB_API_KEY` | Datos complementarios de equipos |
+| `API_FOOTBALL_KEY` | Sync de CONMEBOL/Copa del Mundo vía API-Football |
+| `STRIPE_KEY` / `STRIPE_SECRET` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_*_PRICE_ID` | Checkout de suscripciones en USD (código presente, sin uso activo hoy) |
+| `SIP_BASE_AUTH_URL` / `SIP_BASE_API_URL` / `SIP_USERNAME` / `SIP_PASSWORD` / `SIP_APIKEY_SERVICIO` | Credenciales del merchant SIP para generar QR de cobro en Bolivianos |
+| `SIP_CALLBACK_URL` / `SIP_CALLBACK_BASIC_USER` / `SIP_CALLBACK_BASIC_PASSWORD` | Webhook que SIP llama para confirmar un pago (`SubscriptionController::sipCallback`) |
 
-## Contributing
+Ninguna de estas vive en `.env.example` (son credenciales reales, no placeholders de documentación) —
+pedilas al equipo o generá las tuyas de prueba.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Tareas programadas
 
-## Code of Conduct
+`routes/console.php` define, además del sync deportivo, el ciclo de Franco:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+- `ai:predict` — genera predicciones de partidos próximos y evalúa los que ya terminaron (cada hora).
+- `kaggle:import --force` + `kaggle:compute-elo --incremental` — actualiza el Elo histórico (semanal).
 
-## Security Vulnerabilities
+Para que corran en producción, agregá a cron:
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```
+* * * * * php /path-to-app/artisan schedule:run >> /dev/null 2>&1
+```
 
-## License
+## Tests
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```bash
+php artisan test
+```
+
+Usa SQLite en memoria (`phpunit.xml`) — no toca la base de datos real. Los servicios externos (SIP,
+football-data, Stripe) se mockean con `Http::fake()`/mocks, nunca se llama a las APIs reales desde los
+tests.
+
+## Soporte / Admin
+
+Con una cuenta `role = 'admin'` (la seed crea `admin@demo.com` / `password`):
+
+- `GET/PATCH /api/v1/admin/users` — listar, cambiar plan, resetear contraseña, suspender cuentas.
+- `GET /api/v1/admin/subscriptions` + `POST .../confirm` — confirmar manualmente un pago SIP que quedó
+  `pending_payment` (el usuario pagó pero el callback de SIP nunca llegó).
+- `/telescope` — logs, excepciones y jobs fallidos.
