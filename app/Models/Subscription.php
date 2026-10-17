@@ -18,6 +18,9 @@ class Subscription extends Model
         'user_id',
         'stripe_subscription_id',
         'stripe_customer_id',
+        'payment_provider',
+        'sip_referencia',
+        'sip_qr_id',
         'plan',
         'status',
         'monthly_price',
@@ -77,30 +80,36 @@ class Subscription extends Model
             'predictor' => [
                 'monthly' => [
                     'price' => 1.99,
+                    'price_bob' => 14,
                     'stripe_price_id' => env('STRIPE_PREDICTOR_MONTHLY_PRICE_ID'),
                 ],
                 'annual' => [
                     'price' => 14.99,
+                    'price_bob' => 104,
                     'stripe_price_id' => env('STRIPE_PREDICTOR_ANNUAL_PRICE_ID'),
                 ],
             ],
             'pro' => [
                 'monthly' => [
                     'price' => 4.99,
+                    'price_bob' => 35,
                     'stripe_price_id' => env('STRIPE_PRO_MONTHLY_PRICE_ID'),
                 ],
                 'annual' => [
                     'price' => 39.99,
+                    'price_bob' => 279,
                     'stripe_price_id' => env('STRIPE_PRO_ANNUAL_PRICE_ID'),
                 ],
             ],
             'premium' => [
                 'monthly' => [
                     'price' => 9.99,
+                    'price_bob' => 69,
                     'stripe_price_id' => env('STRIPE_PREMIUM_MONTHLY_PRICE_ID'),
                 ],
                 'annual' => [
                     'price' => 79.99,
+                    'price_bob' => 559,
                     'stripe_price_id' => env('STRIPE_PREMIUM_ANNUAL_PRICE_ID'),
                 ],
             ],

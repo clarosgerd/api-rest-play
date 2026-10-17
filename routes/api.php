@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\AdminSubscriptionController;
+use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\AdvancementController;
 use App\Http\Controllers\AiCompetitorController;
 use App\Http\Controllers\AiPredictionController;
@@ -272,11 +274,28 @@ Route::group(['prefix' => 'v1'], function () {
         Route::get('user/subscription/plans', [SubscriptionController::class, 'plans']);
         Route::post('user/subscription/checkout', [SubscriptionController::class, 'checkout']);
         Route::post('user/subscription/cancel', [SubscriptionController::class, 'cancel']);
+        Route::get('user/subscription/payment-status/{referencia}', [SubscriptionController::class, 'paymentStatus']);
 
         // Sync (admin only)
         Route::post('sync', [SyncController::class, 'sync'])->middleware('admin');
+
+        // Panel de soporte para super admin (17/10/2026)
+        Route::middleware('admin')->prefix('admin')->group(function () {
+            Route::get('users', [AdminUserController::class, 'index']);
+            Route::get('users/{user}', [AdminUserController::class, 'show']);
+            Route::patch('users/{user}', [AdminUserController::class, 'update']);
+            Route::post('users/{user}/reset-password', [AdminUserController::class, 'resetPassword']);
+            Route::post('users/{user}/toggle-suspended', [AdminUserController::class, 'toggleSuspended']);
+
+            Route::get('subscriptions', [AdminSubscriptionController::class, 'index']);
+            Route::post('subscriptions/{subscription}/confirm', [AdminSubscriptionController::class, 'confirm']);
+            Route::get('payments', [AdminSubscriptionController::class, 'payments']);
+        });
     });
 
-    // Stripe webhook (no auth)
+    // Stripe webhook (no auth) — sin uso activo desde que las suscripciones se cobran por SIP, se deja por si se retoma Stripe/USD
     Route::post('webhook/stripe', [SubscriptionController::class, 'webhook']);
+
+    // SIP callback (no auth — valida Basic Auth propio, ver SubscriptionController::sipCallback())
+    Route::post('subscription/sip/callback', [SubscriptionController::class, 'sipCallback']);
 });

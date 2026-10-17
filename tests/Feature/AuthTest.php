@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Mail\WelcomeMail;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 class AuthTest extends TestCase
@@ -20,6 +22,8 @@ class AuthTest extends TestCase
 
     public function test_register_success(): void
     {
+        Mail::fake();
+
         $response = $this->postJson('/api/v1/auth/register', $this->validUserData);
 
         $response->assertStatus(201)
@@ -32,6 +36,18 @@ class AuthTest extends TestCase
             ->assertJson(['token_type' => 'Bearer']);
 
         $this->assertDatabaseHas('users', ['email' => 'john@example.com']);
+    }
+
+    public function test_register_queues_welcome_email(): void
+    {
+        Mail::fake();
+
+        $this->postJson('/api/v1/auth/register', $this->validUserData)
+            ->assertStatus(201);
+
+        Mail::assertQueued(WelcomeMail::class, function (WelcomeMail $mail) {
+            return $mail->user->email === 'john@example.com';
+        });
     }
 
     public function test_register_duplicate_email_fails(): void

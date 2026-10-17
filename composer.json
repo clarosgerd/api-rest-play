@@ -10,6 +10,7 @@
         "guzzlehttp/guzzle": "^7.9",
         "laravel/framework": "^12.0",
         "laravel/sanctum": "^4.0",
+        "laravel/telescope": "^5.26",
         "laravel/tinker": "^2.10.1",
         "roach-php/core": "^3.2",
         "roach-php/laravel": "^3.2",

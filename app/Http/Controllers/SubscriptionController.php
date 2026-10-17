@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Actions\ConfirmarPagoSuscripcionAction;
+use App\Actions\GenerarPagoSuscripcionAction;
 use App\Models\Subscription;
 use App\Models\User;
+use App\Services\SipService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Stripe\Customer;
-use Stripe\Exception\ApiErrorException;
 use Stripe\Stripe;
 use Stripe\Subscription as StripeSubscription;
 
@@ -51,105 +54,153 @@ class SubscriptionController extends Controller
         ]);
     }
 
+    /**
+     * Precios en Bolivianos vía SIP (16/10/2026) — reemplaza el checkout de
+     * Stripe por ahora. El shape de respuesta es el que ya espera el
+     * frontend (array `data`, no objeto por clave) — antes nunca matcheaba.
+     */
     public function plans()
     {
         $plans = Subscription::getPlans();
 
+        $data = collect(['predictor', 'pro', 'premium'])->map(function (string $plan) use ($plans) {
+            $limits = (new User(['subscription_tier' => $plan]))->getTierLimits();
+
+            return [
+                'plan' => $plan,
+                'monthly_price' => $plans[$plan]['monthly']['price_bob'],
+                'annual_price' => $plans[$plan]['annual']['price_bob'],
+                'predictions_per_day' => $limits['predictions_per_day'] === -1 ? null : $limits['predictions_per_day'],
+                'tournament_limit' => $limits['tournaments'] === -1 ? null : $limits['tournaments'],
+            ];
+        })->values();
+
         return response()->json([
-            'plans' => [
-                'predictor' => [
-                    'name' => 'Predictor',
-                    'features' => [
-                        'Unlimited predictions',
-                        'Compete in any group you\'re invited to',
-                        'No tournament/group ownership (invitee seat)',
-                    ],
-                    'monthly' => $plans['predictor']['monthly']['price'],
-                    'annual' => $plans['predictor']['annual']['price'],
-                    'annual_savings' => round(($plans['predictor']['monthly']['price'] * 12) - $plans['predictor']['annual']['price'], 2),
-                ],
-                'pro' => [
-                    'name' => 'Pro',
-                    'features' => [
-                        '5 tournaments',
-                        '50 members per group',
-                        '20 predictions per day',
-                        'CONMEBOL & South American leagues',
-                        'Advanced notifications',
-                        'Priority scoring',
-                    ],
-                    'monthly' => $plans['pro']['monthly']['price'],
-                    'annual' => $plans['pro']['annual']['price'],
-                    'annual_savings' => round(($plans['pro']['monthly']['price'] * 12) - $plans['pro']['annual']['price'], 2),
-                ],
-                'premium' => [
-                    'name' => 'Premium',
-                    'features' => [
-                        'Unlimited tournaments',
-                        'Unlimited members per group',
-                        'Unlimited predictions per day',
-                        'All leagues worldwide (World Cup, Champions, etc.)',
-                        'Complete notifications + analytics',
-                        'Real-time scoring',
-                        'Tournament creation tools',
-                    ],
-                    'monthly' => $plans['premium']['monthly']['price'],
-                    'annual' => $plans['premium']['annual']['price'],
-                    'annual_savings' => round(($plans['premium']['monthly']['price'] * 12) - $plans['premium']['annual']['price'], 2),
-                ],
-            ],
-            'trial_days' => 7,
-            'currency' => 'USD',
+            'data' => $data,
+            'currency' => 'BOB',
         ]);
     }
 
-    public function checkout(Request $request)
+    /**
+     * Genera el QR de cobro SIP para la suscripción elegida (16/10/2026) —
+     * reemplaza el checkout de Stripe por ahora, todo en Bolivianos.
+     */
+    public function checkout(Request $request, GenerarPagoSuscripcionAction $action)
     {
         $validated = $request->validate([
             'plan' => 'required|in:predictor,pro,premium',
             'billing' => 'required|in:monthly,annual',
         ]);
 
-        $user = $request->user();
-        $plans = Subscription::getPlans();
-        $planConfig = $plans[$validated['plan']][$validated['billing']];
-        $priceId = $planConfig['stripe_price_id'];
+        try {
+            $result = $action->handle($request->user(), $validated['plan'], $validated['billing'] === 'annual');
+        } catch (\Throwable $e) {
+            Log::error("No se pudo generar el QR de pago de suscripción: {$e->getMessage()}");
+
+            return response()->json(['message' => 'No se pudo generar el código QR de pago.'], 500);
+        }
+
+        $subscription = $result['subscription'];
+        $qr = $result['qr'];
+        $objeto = $qr['objeto'] ?? $qr;
+
+        return response()->json([
+            'referencia' => $subscription->sip_referencia,
+            'qr_image_base64' => $objeto['imagenQr'] ?? null,
+            'monto' => $subscription->is_annual ? (float) $subscription->annual_price : (float) $subscription->monthly_price,
+            'moneda' => 'BOB',
+            'banco_destino' => $objeto['bancoDestino'] ?? null,
+            'cuenta_destino' => $objeto['cuentaDestino'] ?? null,
+            'expires_at' => $objeto['fechaVencimiento'] ?? null,
+        ], 201);
+    }
+
+    /**
+     * Estado del pago de suscripción — para el polling del frontend
+     * (16/10/2026). Consulta primero el estado local; si sigue pendiente,
+     * respalda consultando directamente a SIP (no confiar solo en que el
+     * callback llegue a tiempo, mismo criterio que pago_status.php en
+     * elascenso/event).
+     */
+    public function paymentStatus(string $referencia, Request $request, SipService $sip, ConfirmarPagoSuscripcionAction $confirmar)
+    {
+        $subscription = Subscription::where('sip_referencia', $referencia)
+            ->where('user_id', $request->user()->user_id)
+            ->firstOrFail();
+
+        if ($subscription->status === 'pending_payment') {
+            try {
+                $token = $sip->generarToken();
+                $accessToken = $token['token'] ?? $token['data']['token'] ?? $token['access_token'] ?? '';
+                $estado = $sip->estadoTransaccion($referencia, $accessToken);
+                $objeto = $estado['objeto'] ?? $estado;
+
+                if (($objeto['estadoActual'] ?? null) === 'PAGADO') {
+                    $subscription = $confirmar->handle($referencia);
+                }
+            } catch (\Throwable $e) {
+                Log::error("No se pudo consultar el estado SIP de {$referencia}: {$e->getMessage()}");
+            }
+        }
+
+        return response()->json([
+            'referencia' => $subscription->sip_referencia,
+            'status' => $subscription->status,
+        ]);
+    }
+
+    /**
+     * Callback que invoca SIP al confirmar un pago (16/10/2026). Contrato
+     * exacto exigido por la spec de SIP — no se cambia: Basic Auth +
+     * respuesta siempre {"codigo":..., "mensaje":...}.
+     */
+    public function sipCallback(Request $request, ConfirmarPagoSuscripcionAction $confirmar)
+    {
+        $authorization = $request->header('Authorization', '');
+
+        if (! str_starts_with($authorization, 'Basic ')) {
+            return response()->json(['codigo' => '9999', 'mensaje' => 'No autorizado'], 401);
+        }
+
+        $decoded = base64_decode(substr($authorization, 6), true);
+        [$authUser, $authPassword] = str_contains((string) $decoded, ':')
+            ? explode(':', $decoded, 2)
+            : ['', ''];
+
+        $validUser = hash_equals((string) config('sip.callback_basic_user'), (string) $authUser);
+        $validPassword = hash_equals((string) config('sip.callback_basic_password'), (string) $authPassword);
+
+        if (! $validUser || ! $validPassword) {
+            return response()->json(['codigo' => '9999', 'mensaje' => 'No autorizado'], 401);
+        }
+
+        $alias = (string) $request->input('alias', '');
+
+        if ($alias === '') {
+            return response()->json(['codigo' => '9999', 'mensaje' => 'Se requiere "alias"'], 400);
+        }
 
         try {
-            $customerId = $this->getOrCreateStripeCustomer($user);
+            $confirmar->handle($alias);
 
-            $session = \Stripe\Checkout\Session::create([
-                'customer' => $customerId,
-                'payment_method_types' => ['card'],
-                'line_items' => [[
-                    'price' => $priceId,
-                    'quantity' => 1,
-                ]],
-                'mode' => 'subscription',
-                'subscription_data' => [
-                    'trial_period_days' => 7,
-                ],
-                'success_url' => env('APP_URL').'/subscription/success?session_id={CHECKOUT_SESSION_ID}',
-                'cancel_url' => env('APP_URL').'/subscription/cancel',
-                'metadata' => [
-                    'user_id' => $user->user_id,
-                    'plan' => $validated['plan'],
-                    'billing' => $validated['billing'],
-                ],
-            ]);
+            return response()->json(['codigo' => '0000', 'mensaje' => 'Registro Exitoso'], 200);
+        } catch (\DomainException $e) {
+            Log::warning("Callback SIP con alias no resuelto: {$alias} — {$e->getMessage()}");
 
-            return response()->json([
-                'checkout_url' => $session->url,
-                'session_id' => $session->id,
-            ]);
-        } catch (ApiErrorException $e) {
-            return response()->json([
-                'message' => 'Payment processing failed',
-                'error' => $e->getMessage(),
-            ], 500);
+            return response()->json(['codigo' => '9999', 'mensaje' => $e->getMessage()], 200);
+        } catch (\Throwable $e) {
+            Log::error("Error procesando el callback SIP de {$alias}: {$e->getMessage()}");
+
+            return response()->json(['codigo' => '9999', 'mensaje' => 'Error interno'], 500);
         }
     }
 
+    /**
+     * SIP no tiene concepto de suscripción recurrente (es QR por período) —
+     * cancelar solo marca el registro local; el usuario deja de tener plan
+     * pago automáticamente cuando `subscription_expires_at` vence
+     * (ver User::isSubscriptionActive()).
+     */
     public function cancel(Request $request)
     {
         $user = $request->user();
@@ -159,27 +210,14 @@ class SubscriptionController extends Controller
             return response()->json(['message' => 'No active subscription to cancel'], 404);
         }
 
-        try {
-            if ($subscription->stripe_subscription_id) {
-                StripeSubscription::update($subscription->stripe_subscription_id, [
-                    'cancel_at_period_end' => true,
-                ]);
-            }
+        $subscription->update([
+            'cancelled_at' => Carbon::now(),
+        ]);
 
-            $subscription->update([
-                'cancelled_at' => Carbon::now(),
-            ]);
-
-            return response()->json([
-                'message' => 'Subscription will be cancelled at the end of the current period',
-                'expires_at' => $subscription->current_period_end,
-            ]);
-        } catch (ApiErrorException $e) {
-            return response()->json([
-                'message' => 'Failed to cancel subscription',
-                'error' => $e->getMessage(),
-            ], 500);
-        }
+        return response()->json([
+            'message' => 'Subscription will be cancelled at the end of the current period',
+            'expires_at' => $subscription->current_period_end,
+        ]);
     }
 
     public function webhook(Request $request)

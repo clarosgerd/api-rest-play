@@ -33,6 +33,7 @@ class User extends Authenticatable
         'last_login',
         'verified',
         'role',
+        'suspended_at',
         'subscription_tier',
         'subscription_expires_at',
         'stripe_customer_id',
@@ -59,6 +60,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password_hash' => 'hashed',
+            'suspended_at' => 'datetime',
         ];
     }
 

@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Mail\WelcomeMail;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -24,6 +27,12 @@ class AuthController extends Controller
             'email' => $validated['email'],
             'password_hash' => Hash::make($validated['password']),
         ]);
+
+        try {
+            Mail::to($user->email)->queue(new WelcomeMail($user));
+        } catch (\Throwable $e) {
+            Log::error("No se pudo encolar el correo de bienvenida para {$user->email}: {$e->getMessage()}");
+        }
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
@@ -48,6 +57,12 @@ class AuthController extends Controller
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
+        }
+
+        if ($user->suspended_at) {
+            return response()->json([
+                'message' => 'Tu cuenta fue suspendida. Contactá soporte.',
+            ], 403);
         }
 
         $token = $user->createToken('auth_token')->plainTextToken;

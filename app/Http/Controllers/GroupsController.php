@@ -9,9 +9,11 @@ use App\Http\Resources\GroupsCollection;
 use App\Http\Resources\GroupsResource;
 use App\Models\GroupMembers;
 use App\Models\Groups;
+use App\Notifications\GroupCreatedNotification;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class GroupsController extends Controller
@@ -63,14 +65,18 @@ class GroupsController extends Controller
         $data = $request->all();
         $data['creator_id'] = auth()->id();
 
-        return new GroupsResource(Groups::create($data));
+        $group = Groups::create($data);
+
+        $this->notifyGroupCreated($request->user(), $group);
+
+        return new GroupsResource($group);
     }
 
     public function insertFirt(StoreGroupsRequest $request)
     {
         $creatorId = auth()->id();
 
-        DB::transaction(function () use ($request, $creatorId) {
+        $group = DB::transaction(function () use ($request, $creatorId) {
 
             $group = new Groups;
             $group->tournament_id = $request->get('tournament_id');
@@ -106,11 +112,27 @@ class GroupsController extends Controller
             $member->is_admin = $request->get('is_admin') ?? 1;
             $member->save();
 
-            //     return new GroupsResource($group);
+            return $group;
         });
 
-        // dd (Groups::all());
-        return new GroupsResource(Groups::all()->last());
+        $this->notifyGroupCreated($request->user(), $group);
+
+        return new GroupsResource($group);
+    }
+
+    /**
+     * Correo con el código de invitación al crear un grupo (17/10/2026) —
+     * mismo criterio no-fatal que ya usa el resto del código (ver
+     * SubscriptionController::handlePaymentFailed()): un fallo de correo
+     * nunca debe tumbar la creación del grupo.
+     */
+    private function notifyGroupCreated($user, Groups $group): void
+    {
+        try {
+            $user->notify(new GroupCreatedNotification($group));
+        } catch (\Throwable $e) {
+            Log::error("No se pudo notificar la creación del grupo {$group->group_id}: {$e->getMessage()}");
+        }
     }
 
     /**

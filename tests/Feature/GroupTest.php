@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\Groups;
 use App\Models\User;
+use App\Notifications\GroupCreatedNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -137,7 +139,9 @@ class GroupTest extends TestCase
             'max_members' => '20',
         ]);
 
-        $response->assertStatus(200);
+        // 201, no 200: ahora se devuelve el $group recién creado en memoria
+        // (wasRecentlyCreated=true), no un refetch vía Groups::all()->last().
+        $response->assertStatus(201);
         $this->assertDatabaseHas('groups', [
             'name' => 'My First Group',
             'creator_id' => $user->user_id,
@@ -149,6 +153,51 @@ class GroupTest extends TestCase
             'user_id' => $user->user_id,
             'is_admin' => 1,
         ]);
+    }
+
+    public function test_store_group_sends_invitation_code_email(): void
+    {
+        Notification::fake();
+        $user = $this->createUser();
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/v1/group', [
+            'name' => 'My Group',
+            'description' => 'Best group ever',
+            'is_public' => true,
+            'max_members' => 10,
+        ])->assertStatus(201);
+
+        $group = Groups::where('name', 'My Group')->first();
+
+        Notification::assertSentTo(
+            $user,
+            GroupCreatedNotification::class,
+            fn (GroupCreatedNotification $notification) => $notification->group->is($group)
+                && $notification->group->invitation_code === $group->invitation_code
+        );
+    }
+
+    public function test_insert_first_sends_invitation_code_email(): void
+    {
+        Notification::fake();
+        $user = $this->createUser();
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/v1/group/first', [
+            'name' => 'My First Group',
+            'description' => 'Best group ever',
+            'is_public' => '1',
+            'max_members' => '20',
+        ])->assertStatus(201);
+
+        $group = Groups::where('name', 'My First Group')->first();
+
+        Notification::assertSentTo(
+            $user,
+            GroupCreatedNotification::class,
+            fn (GroupCreatedNotification $notification) => $notification->group->is($group)
+        );
     }
 
     public function test_update_group(): void

@@ -41,14 +41,12 @@ class SubscriptionTest extends TestCase
 
         $response->assertOk()
             ->assertJsonStructure([
-                'plans' => ['pro', 'premium'],
-                'trial_days',
+                'data' => [
+                    '*' => ['plan', 'monthly_price', 'annual_price', 'predictions_per_day', 'tournament_limit'],
+                ],
                 'currency',
             ])
-            ->assertJson([
-                'trial_days' => 7,
-                'currency' => 'USD',
-            ]);
+            ->assertJson(['currency' => 'BOB']);
     }
 
     public function test_pro_plan_has_correct_limits(): void
@@ -102,9 +100,12 @@ class SubscriptionTest extends TestCase
         $response = $this->actingAs($this->user)
             ->getJson('/api/v1/user/subscription/plans');
 
-        $response->assertOk()
-            ->assertJsonStructure(['plans' => ['predictor', 'pro', 'premium']])
-            ->assertJsonPath('plans.predictor.monthly', 1.99);
+        $response->assertOk();
+        $plans = collect($response->json('data'))->keyBy('plan');
+
+        $this->assertTrue($plans->has('predictor'));
+        $this->assertEquals(14, $plans['predictor']['monthly_price']);
+        $this->assertEquals(0, $plans['predictor']['tournament_limit']);
     }
 
     public function test_has_paid_subscription_is_false_for_free_true_for_paid_tiers(): void
