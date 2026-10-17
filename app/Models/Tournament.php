@@ -29,6 +29,7 @@ class Tournament extends Model
         'status',
         'created_by',
         'external_id',
+        'last_synced_at',
         'is_promotional',
         'promotional_tier_required',
         'promotional_ends_at',
@@ -39,6 +40,7 @@ class Tournament extends Model
         return [
             'is_promotional' => 'boolean',
             'promotional_ends_at' => 'datetime',
+            'last_synced_at' => 'datetime',
         ];
     }
 

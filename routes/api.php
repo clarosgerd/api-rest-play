@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\AdvancementController;
+use App\Http\Controllers\AiCompetitorController;
+use App\Http\Controllers\AiPredictionController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BetsController;
 use App\Http\Controllers\BonusesController;
@@ -100,6 +102,11 @@ Route::group(['prefix' => 'v1'], function () {
     // Sync status (public read — used by landing page)
     Route::get('sync/status', [SyncController::class, 'status']);
 
+    // AI predictions (public read)
+    Route::get('match/{match}/ai-prediction', [AiPredictionController::class, 'show']);
+    Route::get('tournament/{tournament}/ai-predictions', [AiPredictionController::class, 'tournament']);
+    Route::get('ai-predictions/accuracy', [AiPredictionController::class, 'accuracy']);
+
     // Protected routes (auth required for writes)
     Route::middleware('auth:sanctum')->group(function () {
 
@@ -120,6 +127,9 @@ Route::group(['prefix' => 'v1'], function () {
         Route::patch('tournament/{tournament}/go-live', [TournamentController::class, 'goLive']);
         Route::patch('tournament/{tournament}/close', [TournamentController::class, 'close']);
         Route::delete('tournament/{tournament}', [TournamentController::class, 'destroy']);
+        Route::post('tournament/{tournament}/assign-manager', [TournamentController::class, 'assignManager']);
+        Route::post('tournament/{tournament}/remove-manager', [TournamentController::class, 'removeManager']);
+        Route::get('tournament/{tournament}/managers', [TournamentController::class, 'managers']);
 
         // Manual match results (owner only)
         Route::patch('tournament/{tournamentId}/match/{matchId}/result', [ManualMatchController::class, 'updateResult']);
@@ -166,6 +176,12 @@ Route::group(['prefix' => 'v1'], function () {
         Route::get('my-tournament-memberships', [GroupsController::class, 'myTournamentMemberships']);
         Route::get('tournament/{tournamentId}/my-memberships', [GroupsController::class, 'myMemberships']);
         Route::delete('group/{group}', [GroupsController::class, 'destroy']);
+
+        // AI Competitor
+        Route::post('group/{group}/ai-competitor', [AiCompetitorController::class, 'toggle']);
+        Route::post('group/{group}/ai-competitor/regenerate', [AiCompetitorController::class, 'regenerate']);
+        Route::get('group/{group}/ai-competitor', [AiCompetitorController::class, 'status']);
+        Route::get('group/{group}/ai-competitor/prediction/{matchId}', [AiCompetitorController::class, 'prediction']);
 
         // Group Members (write)
         Route::post('member', [GroupMembersController::class, 'store']);

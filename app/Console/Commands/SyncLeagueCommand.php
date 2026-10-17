@@ -18,7 +18,7 @@ class SyncLeagueCommand extends Command
         {--country= : Country name (auto-detected if not provided)}
         {--season= : Year like 2024 (default: current year)}';
 
-    protected $description = 'Sync any league from API-Football (teams + fixtures)';
+    protected $description = 'Sync any league from API-Football (teams + fixtures). NOTE: free plan only allows seasons 2022-2024.';
 
     private const KNOWN_LEAGUES = [
         'bolivia' => ['id' => 344, 'name' => 'Bolivian Primera División', 'country' => 'Bolivia'],
@@ -31,7 +31,7 @@ class SyncLeagueCommand extends Command
         'uruguay' => ['id' => 269, 'name' => 'Uruguayan Primera División', 'country' => 'Uruguay'],
         'paraguay' => ['id' => 254, 'name' => 'Paraguayan Primera División', 'country' => 'Paraguay'],
         'venezuela' => ['id' => 267, 'name' => 'Venezuelan Primera División', 'country' => 'Venezuela'],
-        'mexico' => ['id' => 36, 'name' => 'Liga MX', 'country' => 'Mexico'],
+        'mexico' => ['id' => 262, 'name' => 'Liga MX', 'country' => 'Mexico'],
         'usa' => ['id' => 253, 'name' => 'MLS', 'country' => 'USA'],
         'spain' => ['id' => 140, 'name' => 'La Liga', 'country' => 'Spain'],
         'england' => ['id' => 39, 'name' => 'Premier League', 'country' => 'England'],
@@ -40,6 +40,11 @@ class SyncLeagueCommand extends Command
         'france' => ['id' => 61, 'name' => 'Ligue 1', 'country' => 'France'],
         'portugal' => ['id' => 94, 'name' => 'Primeira Liga', 'country' => 'Portugal'],
         'netherlands' => ['id' => 88, 'name' => 'Eredivisie', 'country' => 'Netherlands'],
+        'belgium' => ['id' => 144, 'name' => 'Jupiler Pro League', 'country' => 'Belgium'],
+        'turkey' => ['id' => 203, 'name' => 'Süper Lig', 'country' => 'Turkey'],
+        'champions-league' => ['id' => 2, 'name' => 'UEFA Champions League', 'country' => 'World'],
+        'europa-league' => ['id' => 3, 'name' => 'UEFA Europa League', 'country' => 'World'],
+        'conference-league' => ['id' => 848, 'name' => 'UEFA Europa Conference League', 'country' => 'World'],
     ];
 
     public function handle(ApiFootballService $api): int
@@ -79,6 +84,7 @@ class SyncLeagueCommand extends Command
         $this->info("Syncing {$name} ({$country}) season {$season}...");
 
         $tournament = $this->getOrCreateTournament($name, $season, $leagueId, $country);
+        $tournament->update(['last_synced_at' => now()]);
         $syncedTeams = $this->syncTeams($api, $tournament, $leagueId, (int) $season);
         $syncedMatches = $this->syncFixtures($api, $tournament, $leagueId, (int) $season);
 
@@ -119,6 +125,7 @@ class SyncLeagueCommand extends Command
         }
 
         $synced = 0;
+        $now = now();
 
         foreach ($response['response'] as $teamData) {
             $teamInfo = $teamData['team'];
@@ -133,6 +140,7 @@ class SyncLeagueCommand extends Command
                 'flag_url' => null,
                 'active' => true,
                 'external_id' => $teamInfo['id'],
+                'last_synced_at' => $now,
             ];
 
             if ($existing) {
@@ -164,6 +172,7 @@ class SyncLeagueCommand extends Command
         }
 
         $synced = 0;
+        $now = now();
 
         foreach ($response['response'] as $fixtureData) {
             $fixture = $fixtureData['fixture'];
@@ -200,6 +209,7 @@ class SyncLeagueCommand extends Command
                 'home_score' => $goals['home'] ?? 0,
                 'away_score' => $goals['away'] ?? 0,
                 'external_id' => $externalId,
+                'last_synced_at' => $now,
             ];
 
             if ($existing) {
@@ -239,6 +249,7 @@ class SyncLeagueCommand extends Command
             'end_date' => $season.'-12-31',
             'active' => true,
             'external_id' => $externalId,
+            'last_synced_at' => now(),
         ]);
     }
 

@@ -14,12 +14,23 @@ use Illuminate\Console\Command;
 
 class SyncEspnCommand extends Command
 {
+
     protected $signature = 'espn:sync
         {--league= : ESPN league ID (eng.1, esp.1, etc). Omit for all.}
         {--type=all : What to sync: all, teams, fixtures, players, standings}
-        {--season= : Season year (default: current year)}';
+        {--season= : Season year (default: current year)}
+        {--force : Ignore last_synced_at and re-sync everything}';
 
     protected $description = 'Sync football data from ESPN (free, no API key) + football-data.org standings';
+
+    /**
+     * Incremental sync thresholds (hours).
+     */
+    private const TEAMS_TTL = 24;
+
+    private const PLAYERS_TTL = 24;
+
+    private const FIXTURES_TTL = 2;
 
     private const LEAGUES = [
         'eng.1' => [
@@ -121,26 +132,49 @@ class SyncEspnCommand extends Command
         $totalTeams = 0;
         $totalFixtures = 0;
         $totalPlayers = 0;
+        $force = (bool) $this->option('force');
 
         foreach ($leagues as $espnId => $config) {
             $this->line("── {$config['name']} ({$config['country']}) ──");
 
             $tournament = $this->getOrCreateTournament($config, $season);
 
+            // Capture sync times BEFORE touching last_synced_at
+            $lastTeamSync = Team::where('league', $config['name'])
+                ->whereNotNull('last_synced_at')
+                ->max('last_synced_at');
+            $lastFixtureSync = Matches::where('tournament_id', $tournament->tournament_id)
+                ->whereNotNull('last_synced_at')
+                ->max('last_synced_at');
+
+            $tournament->update(['last_synced_at' => now()]);
+
             if (in_array($type, ['all', 'teams'])) {
-                $totalTeams += $this->syncTeams($espn, $tournament, $espnId, $config);
+                if (! $force && $lastTeamSync && Carbon::parse($lastTeamSync)->gt(now()->subHours(self::TEAMS_TTL))) {
+                    $this->line('  Teams: skipped (synced '.Carbon::parse($lastTeamSync)->diffForHumans().')');
+                } else {
+                    $totalTeams += $this->syncTeams($espn, $tournament, $espnId, $config);
+                }
             }
 
             if (in_array($type, ['all', 'fixtures'])) {
-                $totalFixtures += $this->syncFixtures($espn, $tournament, $espnId, $config);
+                if (! $force && $lastFixtureSync && Carbon::parse($lastFixtureSync)->gt(now()->subHours(self::FIXTURES_TTL))) {
+                    $this->line('  Fixtures: skipped (synced '.Carbon::parse($lastFixtureSync)->diffForHumans().')');
+                } else {
+                    $totalFixtures += $this->syncFixtures($espn, $tournament, $espnId, $config);
+                }
             }
 
             if (in_array($type, ['all', 'players'])) {
-                $totalPlayers += $this->syncPlayers($espn, $tournament, $espnId);
+                if (! $force && $lastTeamSync && Carbon::parse($lastTeamSync)->gt(now()->subHours(self::PLAYERS_TTL))) {
+                    $this->line('  Players: skipped (synced '.Carbon::parse($lastTeamSync)->diffForHumans().')');
+                } else {
+                    $totalPlayers += $this->syncPlayers($espn, $tournament, $espnId);
+                }
             }
 
             if (in_array($type, ['all', 'standings'])) {
-                $this->syncStandingsFromFdc($fd, $tournament, $config);
+                $this->syncStandingsFromFdc($fd, $tournament, $config, $force);
             }
 
             $this->newLine();
@@ -169,6 +203,7 @@ class SyncEspnCommand extends Command
         }
 
         $synced = 0;
+        $now = now();
 
         foreach ($teams as $item) {
             $t = $item['team'];
@@ -183,6 +218,7 @@ class SyncEspnCommand extends Command
                 'flag_url' => null,
                 'active' => true,
                 'external_id' => (int) $t['id'],
+                'last_synced_at' => $now,
             ];
 
             if ($existing) {
@@ -218,9 +254,10 @@ class SyncEspnCommand extends Command
 
         $synced = 0;
         $processed = 0;
+        $now = now();
 
         foreach ($calendar as $dateStr) {
-            if ($processed >= 15) {
+            if ($processed >= 30) {
                 break;
             }
 
@@ -266,6 +303,7 @@ class SyncEspnCommand extends Command
                     'home_score' => (int) ($homeComp['score'] ?? 0),
                     'away_score' => (int) ($awayComp['score'] ?? 0),
                     'external_id' => $externalId,
+                    'last_synced_at' => $now,
                 ];
 
                 if ($existing) {
@@ -354,10 +392,23 @@ class SyncEspnCommand extends Command
     private function syncStandingsFromFdc(
         FootballDataService $fd,
         Tournament $tournament,
-        array $config
+        array $config,
+        bool $force = false
     ): void {
         if (! $config['fd_id']) {
             $this->info('    Standings: no football-data.org ID for this league, skipping.');
+
+            return;
+        }
+
+        // Skip if football-data.org already synced this league's teams recently
+        // (football:sync handles standings for the same competitions)
+        $lastTeamSync = Team::where('league', $config['name'])
+            ->whereNotNull('last_synced_at')
+            ->max('last_synced_at');
+
+        if (! $force && $lastTeamSync && Carbon::parse($lastTeamSync)->gt(now()->subHours(6))) {
+            $this->line('  Standings: skipped (football-data.org data is fresh)');
 
             return;
         }
@@ -425,6 +476,7 @@ class SyncEspnCommand extends Command
             'end_date' => (int) $season + 1 . "-06-30",
             'active' => true,
             'external_id' => $externalId,
+            'last_synced_at' => now(),
         ]);
     }
 

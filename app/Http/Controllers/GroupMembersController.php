@@ -88,6 +88,14 @@ class GroupMembersController extends Controller
     {
         $user = $request->user();
 
+        $hasRules = ($group->exact_score_points > 0)
+            || ($group->match_result_points > 0)
+            || ($group->correct_goal_points > 0);
+
+        if (! $hasRules) {
+            return response()->json(['message' => 'El grupo debe tener reglas de scoring configuradas antes de aceptar predictores'], 422);
+        }
+
         // Check if already a member (any status)
         $existing = GroupMembers::where('group_id', $group->group_id)
             ->where('user_id', $user->user_id)
@@ -137,6 +145,15 @@ class GroupMembersController extends Controller
 
         if (! $isAdmin) {
             return response()->json(['message' => 'No tienes permisos para aprobar miembros'], 403);
+        }
+
+        $group = Groups::find($member->group_id);
+        $hasRules = ($group->exact_score_points > 0)
+            || ($group->match_result_points > 0)
+            || ($group->correct_goal_points > 0);
+
+        if (! $hasRules) {
+            return response()->json(['message' => 'El grupo debe tener reglas de scoring configuradas antes de aceptar predictores'], 422);
         }
 
         if ($member->status !== 'pending') {

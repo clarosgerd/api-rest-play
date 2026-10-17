@@ -10,6 +10,31 @@ use Illuminate\Support\Facades\DB;
 
 class TournamentGroupController extends Controller
 {
+    private function canManageTournament(Tournament $tournament): bool
+    {
+        $userId = auth()->id();
+        $isAdmin = auth()->user()->role === 'admin';
+
+        if ($isAdmin) {
+            return true;
+        }
+
+        return $tournament->created_by === $userId;
+    }
+
+    private function canManageGroup(TournamentGroup $group): bool
+    {
+        $tournament = Tournament::whereHas('tournamentstages', function ($q) use ($group) {
+            $q->where('stage_id', $group->stage_id);
+        })->first();
+
+        if (! $tournament) {
+            return false;
+        }
+
+        return $this->canManageTournament($tournament);
+    }
+
     public function index(Request $request, Tournament $tournament)
     {
         $groups = TournamentGroup::whereHas('stage', function ($q) use ($tournament) {
@@ -24,6 +49,10 @@ class TournamentGroupController extends Controller
 
     public function store(Request $request, Tournament $tournament)
     {
+        if (! $this->canManageTournament($tournament)) {
+            return response()->json(['message' => 'No tienes permiso para gestionar este torneo.'], 403);
+        }
+
         $validated = $request->validate([
             'stage_id' => ['required', 'integer'],
             'name' => ['required', 'string', 'max:50'],
@@ -51,6 +80,10 @@ class TournamentGroupController extends Controller
 
     public function update(Request $request, TournamentGroup $group)
     {
+        if (! $this->canManageGroup($group)) {
+            return response()->json(['message' => 'No tienes permiso para gestionar este grupo.'], 403);
+        }
+
         $validated = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:50'],
             'group_order' => ['sometimes', 'nullable', 'integer', 'min:1'],
@@ -69,6 +102,10 @@ class TournamentGroupController extends Controller
 
     public function destroy(TournamentGroup $group)
     {
+        if (! $this->canManageGroup($group)) {
+            return response()->json(['message' => 'No tienes permiso para gestionar este grupo.'], 403);
+        }
+
         $group->delete();
 
         return response()->json([
@@ -78,6 +115,10 @@ class TournamentGroupController extends Controller
 
     public function addTeams(Request $request, TournamentGroup $group)
     {
+        if (! $this->canManageGroup($group)) {
+            return response()->json(['message' => 'No tienes permiso para gestionar este grupo.'], 403);
+        }
+
         $validated = $request->validate([
             'team_ids' => ['required', 'array', 'min:1'],
             'team_ids.*' => ['integer', 'exists:teams,team_id'],
@@ -117,6 +158,10 @@ class TournamentGroupController extends Controller
 
     public function removeTeam(TournamentGroup $group, int $teamId)
     {
+        if (! $this->canManageGroup($group)) {
+            return response()->json(['message' => 'No tienes permiso para gestionar este grupo.'], 403);
+        }
+
         $deleted = TournamentGroupTeam::where('group_id', $group->group_id)
             ->where('team_id', $teamId)
             ->delete();
@@ -130,6 +175,10 @@ class TournamentGroupController extends Controller
 
     public function approve(TournamentGroup $group)
     {
+        if (! $this->canManageGroup($group)) {
+            return response()->json(['message' => 'No tienes permiso para gestionar este grupo.'], 403);
+        }
+
         $group->update(['status' => 'approved', 'updated_at' => now()]);
 
         return response()->json([
@@ -140,6 +189,10 @@ class TournamentGroupController extends Controller
 
     public function reject(TournamentGroup $group)
     {
+        if (! $this->canManageGroup($group)) {
+            return response()->json(['message' => 'No tienes permiso para gestionar este grupo.'], 403);
+        }
+
         $group->update(['status' => 'rejected', 'updated_at' => now()]);
 
         return response()->json([

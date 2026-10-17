@@ -40,6 +40,7 @@ class TournamentGroupTest extends TestCase
             'start_date' => '2026-06-01',
             'end_date' => '2026-07-15',
             'active' => true,
+            'created_by' => $this->user->user_id,
         ]);
 
         $this->stage = TournamentStage::create([

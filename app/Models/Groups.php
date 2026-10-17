@@ -31,6 +31,7 @@ class Groups extends Model
         'prize_2nd_pct',
         'prize_3rd_pct',
         'pool_active',
+        'ai_competitor_enabled',
         'exact_score_points',
         'match_result_points',
         'correct_goal_points',
@@ -53,6 +54,7 @@ class Groups extends Model
         'multiplier_cuartos' => 'float',
         'multiplier_semifinal' => 'float',
         'multiplier_final' => 'float',
+        'ai_competitor_enabled' => 'boolean',
     ];
 
     public function groupmember()

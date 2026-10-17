@@ -61,7 +61,10 @@ class TeamController extends Controller
 
     public function store(StoreTeamRequest $request)
     {
-        return new TeamResource(Team::create($request->all()));
+        $data = $request->all();
+        $data['created_by'] = auth()->id();
+
+        return new TeamResource(Team::create($data));
     }
     /**
      * Display the specified resource.
@@ -112,11 +115,12 @@ class TeamController extends Controller
 
     public function bulkStore(BulkStoreTeamRequest $request)
     {
-        // dd($request->all());
-        $bulk = collect($request->all())->map(function ($arr, $key) {
+        $userId = auth()->id();
+        $bulk = collect($request->all())->map(function ($arr) use ($userId) {
+            $arr['created_by'] = $userId;
+
             return Arr::except($arr, ['team_id']);
         });
-        // dump($bulk->toArray());
         Team::insert($bulk->toArray());
     }
 

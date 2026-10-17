@@ -34,6 +34,7 @@ class SyncWorldCupCommand extends Command
         $this->info("Syncing World Cup {$season} from API-Football...");
 
         $tournament = $this->getOrCreateTournament($season);
+        $tournament->update(['last_synced_at' => now()]);
 
         match ($type) {
             'all' => $this->syncAll($api, $tournament, $season),
@@ -71,6 +72,7 @@ class SyncWorldCupCommand extends Command
         }
 
         $synced = 0;
+        $now = now();
 
         foreach ($response['response'] as $teamData) {
             $teamInfo = $teamData['team'];
@@ -85,6 +87,7 @@ class SyncWorldCupCommand extends Command
                 'flag_url' => $teamInfo['flag'] ?? null,
                 'active' => true,
                 'external_id' => $teamInfo['id'],
+                'last_synced_at' => $now,
             ];
 
             if ($existing) {
@@ -114,6 +117,7 @@ class SyncWorldCupCommand extends Command
         }
 
         $synced = 0;
+        $now = now();
 
         foreach ($response['response'] as $fixtureData) {
             $fixture = $fixtureData['fixture'];
@@ -150,6 +154,7 @@ class SyncWorldCupCommand extends Command
                 'home_score' => $goals['home'] ?? 0,
                 'away_score' => $goals['away'] ?? 0,
                 'external_id' => $externalId,
+                'last_synced_at' => $now,
             ];
 
             if ($existing) {
@@ -276,6 +281,7 @@ class SyncWorldCupCommand extends Command
             'end_date' => $season . '-07-19',
             'active' => true,
             'external_id' => self::LEAGUE_ID,
+            'last_synced_at' => now(),
         ]);
     }
 

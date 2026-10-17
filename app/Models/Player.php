@@ -27,6 +27,12 @@ class Player extends Model
         'age',
         'photo_url',
         'external_id',
+        'goals',
+        'assists',
+        'games_played',
+        'games_minutes',
+        'tournament_id',
+        'season',
     ];
 
     public function team()

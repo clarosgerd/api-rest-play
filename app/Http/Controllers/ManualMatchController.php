@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\ScoreMatchPredictions;
+use App\Models\GroupMembers;
+use App\Models\Groups;
 use App\Models\Matches;
 use App\Models\Tournament;
 use App\Models\TournamentGroup;
@@ -12,13 +14,29 @@ use Illuminate\Support\Facades\DB;
 
 class ManualMatchController extends Controller
 {
-    public function updateResult(Request $request, int $tournamentId, int $matchId)
+    private function canManageResults(Tournament $tournament): bool
     {
-        $tournament = Tournament::findOrFail($tournamentId);
         $userId = auth()->id();
         $isAdmin = auth()->user()->role === 'admin';
 
-        if ($tournament->created_by !== $userId && ! $isAdmin) {
+        if ($isAdmin || $tournament->created_by === $userId) {
+            return true;
+        }
+
+        $groupIds = Groups::where('tournament_id', $tournament->tournament_id)->pluck('group_id');
+
+        return GroupMembers::whereIn('group_id', $groupIds)
+            ->where('user_id', $userId)
+            ->where('is_admin', 1)
+            ->where('status', 'accepted')
+            ->exists();
+    }
+
+    public function updateResult(Request $request, int $tournamentId, int $matchId)
+    {
+        $tournament = Tournament::findOrFail($tournamentId);
+
+        if (! $this->canManageResults($tournament)) {
             return response()->json(['message' => 'No tienes permiso para editar resultados de este torneo.'], 403);
         }
 
@@ -59,10 +77,8 @@ class ManualMatchController extends Controller
     public function updateStatus(Request $request, int $tournamentId, int $matchId)
     {
         $tournament = Tournament::findOrFail($tournamentId);
-        $userId = auth()->id();
-        $isAdmin = auth()->user()->role === 'admin';
 
-        if ($tournament->created_by !== $userId && ! $isAdmin) {
+        if (! $this->canManageResults($tournament)) {
             return response()->json(['message' => 'No tienes permiso para editar este torneo.'], 403);
         }
 
@@ -90,10 +106,8 @@ class ManualMatchController extends Controller
     public function pendingResults(int $tournamentId)
     {
         $tournament = Tournament::findOrFail($tournamentId);
-        $userId = auth()->id();
-        $isAdmin = auth()->user()->role === 'admin';
 
-        if ($tournament->created_by !== $userId && ! $isAdmin) {
+        if (! $this->canManageResults($tournament)) {
             return response()->json(['message' => 'No tienes permiso.'], 403);
         }
 

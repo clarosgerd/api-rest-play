@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Matches;
+use App\Models\Player;
 use App\Models\Team;
 use App\Models\Tournament;
 use App\Models\TournamentStage;
@@ -14,7 +15,8 @@ class SyncConmebolCommand extends Command
 {
     protected $signature = 'conmebol:sync
         {--competition= : libertadores or sudamericana (default: both)}
-        {--season= : Year like 2026 (default: current year)}';
+        {--season= : Year like 2026 (default: current year)}
+        {--topscorers : Also sync top scorers from API-Football}';
 
     protected $description = 'Sync Copa Libertadores and Copa Sudamericana from API-Football';
 
@@ -54,12 +56,80 @@ class SyncConmebolCommand extends Command
             $synced = $this->syncCompetition($apiFootball, $config, $season);
 
             $this->info("Synced {$synced} matches for {$config['name']}.");
+
+            if ($this->option('topscorers')) {
+                $this->syncTopScorers($apiFootball, $config, $season);
+            }
         }
 
         $this->newLine();
         $this->info('CONMEBOL sync complete.');
 
         return 0;
+    }
+
+    private function syncTopScorers(ApiFootballService $api, array $config, string $season): int
+    {
+        $this->info("  Syncing top scorers for {$config['name']} {$season}...");
+
+        $tournament = Tournament::where('external_id', $config['api_football_id'])->first();
+        if (! $tournament) {
+            $this->warn('  Tournament not found. Run the regular sync first.');
+
+            return 0;
+        }
+
+        $response = $api->getTopScorers($config['api_football_id'], (int) $season);
+
+        if (empty($response['response'])) {
+            $this->warn('  No top scorers returned by API-Football.');
+
+            return 0;
+        }
+
+        $synced = 0;
+        foreach ($response['response'] as $entry) {
+            $playerData = $entry['player'];
+            $stat = $entry['statistics'][0] ?? null;
+
+            if (! $stat) {
+                continue;
+            }
+
+            $teamExternalId = $stat['team']['id'] ?? null;
+            $team = $teamExternalId ? Team::where('external_id', $teamExternalId)->first() : null;
+
+            $externalId = $playerData['id'];
+            $seasonValue = (string) $season;
+
+            $attributes = [
+                'team_id' => $team?->team_id,
+                'name' => $playerData['name'] ?? '',
+                'first_name' => $playerData['firstname'] ?? null,
+                'last_name' => $playerData['lastname'] ?? null,
+                'position' => $stat['games']['position'] ?? null,
+                'nationality' => $playerData['nationality'] ?? null,
+                'birth_date' => $playerData['birth']['date'] ?? null,
+                'age' => $playerData['age'] ?? null,
+                'photo_url' => $playerData['photo'] ?? null,
+                'goals' => (int) ($stat['goals']['total'] ?? 0),
+                'assists' => (int) ($stat['goals']['assists'] ?? 0),
+                'games_played' => (int) ($stat['games']['appearences'] ?? 0),
+                'games_minutes' => (int) ($stat['games']['minutes'] ?? 0),
+                'tournament_id' => $tournament->tournament_id,
+                'season' => $seasonValue,
+            ];
+
+            Player::updateOrCreate(
+                ['external_id' => $externalId, 'tournament_id' => $tournament->tournament_id, 'season' => $seasonValue],
+                $attributes
+            );
+
+            $synced++;
+        }
+
+        $this->info("  Synced {$synced} top scorers for {$config['name']} {$season}.");
+        return $synced;
     }
 
     private function syncCompetition(
@@ -80,6 +150,7 @@ class SyncConmebolCommand extends Command
         $teamsResponse = $api->getTeams($leagueId, (int) $season);
 
         if (! empty($teamsResponse['response'])) {
+            $now = now();
             foreach ($teamsResponse['response'] as $teamData) {
                 $teamInfo = $teamData['team'];
                 $existing = Team::where('external_id', $teamInfo['id'])->first();
@@ -93,6 +164,7 @@ class SyncConmebolCommand extends Command
                     'flag_url' => null,
                     'active' => true,
                     'external_id' => $teamInfo['id'],
+                    'last_synced_at' => $now,
                 ];
 
                 if ($existing) {
@@ -113,6 +185,7 @@ class SyncConmebolCommand extends Command
         }
 
         $synced = 0;
+        $now = now();
 
         foreach ($fixturesResponse['response'] as $fixtureData) {
             $fixture = $fixtureData['fixture'];
@@ -151,6 +224,7 @@ class SyncConmebolCommand extends Command
                 'home_score' => $goals['home'] ?? 0,
                 'away_score' => $goals['away'] ?? 0,
                 'external_id' => $externalId,
+                'last_synced_at' => $now,
             ];
 
             if ($existing) {
@@ -183,6 +257,7 @@ class SyncConmebolCommand extends Command
             'end_date' => $season.'-12-31',
             'active' => true,
             'external_id' => $externalId,
+            'last_synced_at' => now(),
         ];
 
         if ($existing) {

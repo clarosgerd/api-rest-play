@@ -12,9 +12,46 @@ use Illuminate\Console\Command;
 
 class SyncFootballDataCommand extends Command
 {
-    protected $signature = 'football:sync {--competition= : Specific competition ID to sync} {--type=competitions : What to sync: competitions, teams, matches}';
 
-    protected $description = 'Sync football data from football-data.org API';
+    protected $signature = 'football:sync
+        {--competition= : Specific competition ID to sync}
+        {--type=all : What to sync: all, competitions, teams, matches, standings}
+        {--force : Ignore last_synced_at and re-sync everything}';
+
+    protected $description = 'Sync football data from football-data.org (13 free-tier competitions, current seasons)';
+
+    /**
+     * Competitions available in the free tier (verified 2026-07).
+     */
+    private const FREE_COMPETITIONS = [
+        2021 => 'Premier League',
+        2014 => 'Primera Division',
+        2002 => 'Bundesliga',
+        2019 => 'Serie A',
+        2015 => 'Ligue 1',
+        2003 => 'Eredivisie',
+        2017 => 'Primeira Liga',
+        2016 => 'Championship',
+        2013 => 'Campeonato Brasileiro Série A',
+        2001 => 'UEFA Champions League',
+        2152 => 'Copa Libertadores',
+        2000 => 'FIFA World Cup',
+        2018 => 'European Championship',
+    ];
+
+    /**
+     * Incremental sync thresholds (hours).
+     */
+    private const TEAMS_TTL = 24;
+
+    private const MATCHES_TTL = 3;
+
+    private const STANDINGS_TTL = 6;
+
+    /**
+     * Free tier: 10 requests/minute → sleep 7s between calls to stay safe.
+     */
+    private const THROTTLE_SECONDS = 7;
 
     public function handle(FootballDataService $api)
     {
@@ -27,18 +64,29 @@ class SyncFootballDataCommand extends Command
         }
 
         $type = $this->option('type');
-        $competitionId = $this->option('competition');
+        $competitionId = $this->option('competition') ? (int) $this->option('competition') : null;
+        $force = (bool) $this->option('force');
 
-        $this->info("Syncing {$type} from football-data.org...");
+        $this->info("football-data.org sync: {$type}".($force ? ' (FORCED)' : ''));
 
         match ($type) {
             'competitions' => $this->syncCompetitions($api),
-            'teams' => $this->syncTeams($api, $competitionId),
-            'matches' => $this->syncMatches($api, $competitionId),
+            'teams' => $this->syncTeams($api, $competitionId, $force),
+            'matches' => $this->syncMatches($api, $competitionId, $force),
+            'standings' => $this->syncStandings($api, $competitionId, $force),
+            'all' => $this->syncAll($api, $competitionId, $force),
             default => $this->error("Unknown sync type: {$type}"),
         };
 
         return 0;
+    }
+
+    private function syncAll(FootballDataService $api, ?int $competitionId, bool $force): void
+    {
+        $this->syncCompetitions($api);
+        $this->syncTeams($api, $competitionId, $force);
+        $this->syncMatches($api, $competitionId, $force);
+        $this->syncStandings($api, $competitionId, $force);
     }
 
     private function syncCompetitions(FootballDataService $api): void
@@ -52,21 +100,25 @@ class SyncFootballDataCommand extends Command
         }
 
         $synced = 0;
+        $now = now();
 
         foreach ($data['competitions'] as $comp) {
             $existing = Tournament::where('external_id', $comp['id'])->first();
 
             $tournamentData = [
                 'name' => $comp['name'] ?? $comp['code'] ?? "Competition {$comp['id']}",
-                'season' => $comp['currentSeason']['startDate'] ?? date('Y'),
+                'season' => isset($comp['currentSeason']['startDate'])
+                    ? substr($comp['currentSeason']['startDate'], 0, 4)
+                    : date('Y'),
                 'country' => $comp['area']['name'] ?? '',
                 'country_code' => $comp['area']['code'] ?? '',
-                'logo_url' => $comp['emblemUrl'] ?? null,
+                'logo_url' => $comp['emblem'] ?? $comp['emblemUrl'] ?? null,
                 'flag_url' => $comp['area']['flag'] ?? null,
                 'start_date' => $comp['currentSeason']['startDate'] ?? date('Y-m-d'),
                 'end_date' => $comp['currentSeason']['endDate'] ?? date('Y-m-d'),
                 'active' => true,
                 'external_id' => $comp['id'],
+                'last_synced_at' => $now,
             ];
 
             if ($existing) {
@@ -76,52 +128,45 @@ class SyncFootballDataCommand extends Command
             }
 
             $synced++;
-            $this->line("  Synced: {$comp['name']}");
         }
 
-        $this->info("Done. Synced {$synced} competitions.");
+        $this->info("  Synced {$synced} competitions.");
     }
 
-    private function syncTeams(FootballDataService $api, ?int $competitionId): void
+    private function syncTeams(FootballDataService $api, ?int $competitionId, bool $force): void
     {
-        if (! $competitionId) {
-            $competitions = Tournament::whereNotNull('external_id')->get();
+        $first = true;
 
-            if ($competitions->isEmpty()) {
-                $this->error('No competitions with external_id found. Run: php artisan football:sync --type=competitions');
+        foreach ($this->targetCompetitions($competitionId) as $comp) {
+            $lastTeamSync = Team::where('league', $comp->name)
+                ->whereNotNull('last_synced_at')
+                ->max('last_synced_at');
 
-                return;
+            if (! $force && $lastTeamSync && Carbon::parse($lastTeamSync)->gt(now()->subHours(self::TEAMS_TTL))) {
+                $this->line("  Skipping teams for {$comp->name} (synced ".Carbon::parse($lastTeamSync)->diffForHumans().')');
+
+                continue;
             }
 
-            foreach ($competitions as $comp) {
-                $this->syncTeamsForCompetition($api, $comp);
-            }
-        } else {
-            $comp = Tournament::where('external_id', $competitionId)->first();
-
-            if (! $comp) {
-                $this->error("Competition with external_id {$competitionId} not found in database.");
-
-                return;
-            }
-
+            $this->throttle($first);
             $this->syncTeamsForCompetition($api, $comp);
         }
     }
 
     private function syncTeamsForCompetition(FootballDataService $api, Tournament $tournament): void
     {
-        $this->info("Syncing teams for: {$tournament->name}");
+        $this->info("  Teams: {$tournament->name}");
 
         $data = $api->getCompetitionTeams($tournament->external_id);
 
         if (empty($data['teams'])) {
-            $this->warn("  No teams found for {$tournament->name}");
+            $this->warn("    No teams found for {$tournament->name}");
 
             return;
         }
 
         $synced = 0;
+        $now = now();
 
         foreach ($data['teams'] as $teamData) {
             $existing = Team::where('external_id', $teamData['id'])->first();
@@ -131,10 +176,11 @@ class SyncFootballDataCommand extends Command
                 'country' => $teamData['area']['name'] ?? $tournament->country,
                 'country_code' => $teamData['area']['code'] ?? $tournament->country_code,
                 'league' => $tournament->name,
-                'logo_url' => $teamData['crestUrl'] ?? null,
+                'logo_url' => $teamData['crest'] ?? $teamData['crestUrl'] ?? null,
                 'flag_url' => $teamData['area']['flag'] ?? null,
                 'active' => true,
                 'external_id' => $teamData['id'],
+                'last_synced_at' => $now,
             ];
 
             if ($existing) {
@@ -146,65 +192,62 @@ class SyncFootballDataCommand extends Command
             $synced++;
         }
 
-        $this->info("  Synced {$synced} teams for {$tournament->name}");
+        $tournament->update(['last_synced_at' => $now]);
+        $this->info("    {$synced} teams synced.");
     }
 
-    private function syncMatches(FootballDataService $api, ?int $competitionId): void
+    private function syncMatches(FootballDataService $api, ?int $competitionId, bool $force): void
     {
-        if (! $competitionId) {
-            $competitions = Tournament::whereNotNull('external_id')->get();
+        $first = true;
 
-            if ($competitions->isEmpty()) {
-                $this->error('No competitions with external_id found. Run: php artisan football:sync --type=competitions');
-
-                return;
+        foreach ($this->targetCompetitions($competitionId) as $comp) {
+            if ($this->syncMatchesForCompetition($api, $comp, $force, $first)) {
+                // did NOT skip → count as an API call
             }
-
-            foreach ($competitions as $comp) {
-                $this->syncMatchesForCompetition($api, $comp);
-            }
-        } else {
-            $comp = Tournament::where('external_id', $competitionId)->first();
-
-            if (! $comp) {
-                $this->error("Competition with external_id {$competitionId} not found in database.");
-
-                return;
-            }
-
-            $this->syncMatchesForCompetition($api, $comp);
         }
     }
 
-    private function syncMatchesForCompetition(FootballDataService $api, Tournament $tournament): void
+    private function syncMatchesForCompetition(FootballDataService $api, Tournament $tournament, bool $force, bool &$first = true): bool
     {
-        $this->info("Syncing matches for: {$tournament->name}");
+        // For matches we check the newest match sync time instead of the tournament's
+        $lastMatchSync = Matches::where('tournament_id', $tournament->tournament_id)
+            ->whereNotNull('last_synced_at')
+            ->max('last_synced_at');
+
+        if (! $force && $lastMatchSync && Carbon::parse($lastMatchSync)->gt(now()->subHours(self::MATCHES_TTL))) {
+            $this->line("  Skipping matches for {$tournament->name} (synced ".Carbon::parse($lastMatchSync)->diffForHumans().')');
+
+            return false;
+        }
+
+        $this->info("  Matches: {$tournament->name}");
+
+        $this->throttle($first);
 
         $data = $api->getCompetitionMatches($tournament->external_id, [
-            'status' => 'SCHEDULED,LIVE,IN_PLAY,PAUSED,FINISHED',
+            'status' => 'SCHEDULED,TIMED,LIVE,IN_PLAY,PAUSED,FINISHED',
         ]);
 
         if (empty($data['matches'])) {
-            $this->warn("  No matches found for {$tournament->name}");
+            $this->warn("    No matches found for {$tournament->name}");
 
-            return;
+            return true;
         }
 
         $synced = 0;
+        $now = now();
 
         foreach ($data['matches'] as $matchData) {
             $homeTeam = Team::where('external_id', $matchData['homeTeam']['id'])->first();
             $awayTeam = Team::where('external_id', $matchData['awayTeam']['id'])->first();
 
             if (! $homeTeam || ! $awayTeam) {
-                $this->warn('  Skipping match - teams not found in DB');
-
                 continue;
             }
 
             $status = match ($matchData['status']) {
                 'SCHEDULED', 'TIMED' => 'scheduled',
-                'IN_PLAY', 'PAUSED' => 'live',
+                'IN_PLAY', 'PAUSED', 'LIVE' => 'live',
                 'FINISHED' => 'finished',
                 'SUSPENDED', 'POSTPONED', 'CANCELLED' => 'canceled',
                 default => 'scheduled',
@@ -222,6 +265,7 @@ class SyncFootballDataCommand extends Command
                 'home_score' => $matchData['score']['fullTime']['home'] ?? 0,
                 'away_score' => $matchData['score']['fullTime']['away'] ?? 0,
                 'external_id' => $matchData['id'],
+                'last_synced_at' => $now,
             ];
 
             if ($existing) {
@@ -233,7 +277,86 @@ class SyncFootballDataCommand extends Command
             $synced++;
         }
 
-        $this->info("  Synced {$synced} matches for {$tournament->name}");
+        $this->info("    {$synced} matches synced.");
+
+        return true;
+    }
+
+    private function syncStandings(FootballDataService $api, ?int $competitionId, bool $force): void
+    {
+        $first = true;
+
+        foreach ($this->targetCompetitions($competitionId) as $comp) {
+            $lastTeamSync = Team::where('league', $comp->name)
+                ->whereNotNull('last_synced_at')
+                ->max('last_synced_at');
+
+            if (! $force && $lastTeamSync && Carbon::parse($lastTeamSync)->gt(now()->subHours(self::STANDINGS_TTL))) {
+                $this->line("  Skipping standings for {$comp->name} (synced ".Carbon::parse($lastTeamSync)->diffForHumans().')');
+
+                continue;
+            }
+
+            $this->throttle($first);
+
+            $data = $api->getStandings($comp->external_id);
+
+            if (empty($data['standings'])) {
+                $this->warn("  No standings for {$comp->name}");
+
+                continue;
+            }
+
+            // Ensure teams from standings exist in DB
+            $now = now();
+            foreach ($data['standings'] as $group) {
+                foreach ($group['table'] as $row) {
+                    $teamExternalId = $row['team']['id'] ?? null;
+                    if (! $teamExternalId) {
+                        continue;
+                    }
+
+                    $team = Team::where('external_id', $teamExternalId)->first();
+                    if (! $team) {
+                        Team::create([
+                            'name' => $row['team']['name'] ?? $row['team']['shortName'] ?? "Team {$teamExternalId}",
+                            'country' => $comp->country,
+                            'country_code' => $comp->country_code,
+                            'league' => $comp->name,
+                            'logo_url' => $row['team']['crest'] ?? null,
+                            'flag_url' => null,
+                            'active' => true,
+                            'external_id' => $teamExternalId,
+                            'last_synced_at' => $now,
+                        ]);
+                    }
+                }
+            }
+
+            $this->info("  Standings: {$comp->name} OK");
+        }
+    }
+
+    /**
+     * Resolve which tournaments to process: specific one, or all free-tier ones in DB.
+     *
+     * @return \Illuminate\Support\Collection<int, Tournament>
+     */
+    private function targetCompetitions(?int $competitionId)
+    {
+        if ($competitionId) {
+            $comp = Tournament::where('external_id', $competitionId)->first();
+
+            if (! $comp) {
+                $this->error("Competition with external_id {$competitionId} not found. Run --type=competitions first.");
+
+                return collect();
+            }
+
+            return collect([$comp]);
+        }
+
+        return Tournament::whereIn('external_id', array_keys(self::FREE_COMPETITIONS))->get();
     }
 
     private function getOrCreateStage(Tournament $tournament, array $matchData): int
@@ -254,5 +377,20 @@ class SyncFootballDataCommand extends Command
         }
 
         return $stage->stage_id;
+    }
+
+    /**
+     * Sleep between API calls to respect the free-tier 10 req/min limit.
+     * Skips the sleep for the first call in a sequence.
+     */
+    private function throttle(bool &$first): void
+    {
+        if ($first) {
+            $first = false;
+
+            return;
+        }
+
+        sleep(self::THROTTLE_SECONDS);
     }
 }

@@ -7,8 +7,13 @@ use App\Http\Requests\StoreTournamentRequest;
 use App\Http\Requests\UpdateTournamentRequest;
 use App\Http\Resources\TournamentCollection;
 use App\Http\Resources\TournamentResource;
+use App\Models\GroupMembers;
+use App\Models\Groups;
 use App\Models\Tournament;
+use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class TournamentController extends Controller
 {
@@ -161,7 +166,14 @@ class TournamentController extends Controller
 
     public function toggleActive(Tournament $tournament)
     {
-        $tournament->actived = $tournament->actived ? 0 : 1;
+        $userId = auth()->id();
+        $isAdmin = auth()->user()->role === 'admin';
+
+        if ($tournament->created_by && $tournament->created_by !== $userId && ! $isAdmin) {
+            return response()->json(['message' => 'No tienes permiso para modificar este torneo.'], 403);
+        }
+
+        $tournament->active = $tournament->active ? 0 : 1;
         $tournament->save();
 
         return new TournamentResource($tournament->fresh());
@@ -219,5 +231,135 @@ class TournamentController extends Controller
         $tournament->update(['status' => 'closed']);
 
         return new TournamentResource($tournament->fresh());
+    }
+
+    public function assignManager(Request $request, Tournament $tournament)
+    {
+        $isAdmin = auth()->user()->role === 'admin';
+
+        if (! $isAdmin) {
+            return response()->json(['message' => 'Solo administradores pueden asignar managers.'], 403);
+        }
+
+        $request->validate([
+            'user_id' => ['required', 'integer', 'exists:users,user_id'],
+        ]);
+
+        $user = User::findOrFail($request->user_id);
+
+        $group = Groups::where('tournament_id', $tournament->tournament_id)->first();
+
+        if (! $group) {
+            $group = new Groups;
+            $group->tournament_id = $tournament->tournament_id;
+            $group->name = $tournament->name . ' - Predictores';
+            $group->description = 'Grupo de predicciones para ' . $tournament->name;
+            $group->creator_id = auth()->id();
+            $group->is_public = 0;
+            $group->invitation_code = Str::upper(Str::random(7));
+            $group->max_members = 50;
+            $group->active = 1;
+            $group->bet_amount = 0;
+            $group->prize_1st_pct = 60;
+            $group->prize_2nd_pct = 30;
+            $group->prize_3rd_pct = 10;
+            $group->pool_active = 0;
+            $group->exact_score_points = 10;
+            $group->match_result_points = 5;
+            $group->correct_goal_points = 3;
+            $group->unique_exact_points = 15;
+            $group->multiplier_dieciseisavos = 1;
+            $group->multiplier_octavos = 1;
+            $group->multiplier_cuartos = 1;
+            $group->multiplier_semifinal = 2;
+            $group->multiplier_final = 3;
+            $group->created_at = Carbon::now();
+            $group->save();
+        }
+
+        $existing = GroupMembers::where('group_id', $group->group_id)
+            ->where('user_id', $user->user_id)
+            ->first();
+
+        if ($existing) {
+            $existing->is_admin = 1;
+            $existing->status = 'accepted';
+            $existing->save();
+        } else {
+            $member = new GroupMembers;
+            $member->group_id = $group->group_id;
+            $member->user_id = $user->user_id;
+            $member->joined_at = Carbon::now();
+            $member->is_admin = 1;
+            $member->status = 'accepted';
+            $member->save();
+        }
+
+        return response()->json([
+            'message' => 'Manager asignado correctamente.',
+            'group_id' => $group->group_id,
+            'user' => [
+                'user_id' => $user->user_id,
+                'name' => $user->first_name . ' ' . $user->last_name,
+                'email' => $user->email,
+            ],
+        ]);
+    }
+
+    public function removeManager(Request $request, Tournament $tournament)
+    {
+        $isAdmin = auth()->user()->role === 'admin';
+
+        if (! $isAdmin) {
+            return response()->json(['message' => 'Solo administradores pueden remover managers.'], 403);
+        }
+
+        $request->validate([
+            'user_id' => ['required', 'integer', 'exists:users,user_id'],
+        ]);
+
+        $group = Groups::where('tournament_id', $tournament->tournament_id)->first();
+
+        if (! $group) {
+            return response()->json(['message' => 'No existe grupo vinculado a este torneo.'], 404);
+        }
+
+        $member = GroupMembers::where('group_id', $group->group_id)
+            ->where('user_id', $request->user_id)
+            ->first();
+
+        if (! $member) {
+            return response()->json(['message' => 'El usuario no es miembro del grupo.'], 404);
+        }
+
+        $member->is_admin = 0;
+        $member->save();
+
+        return response()->json(['message' => 'Manager removido correctamente.']);
+    }
+
+    public function managers(Tournament $tournament)
+    {
+        $group = Groups::where('tournament_id', $tournament->tournament_id)->first();
+
+        if (! $group) {
+            return response()->json(['managers' => []]);
+        }
+
+        $managers = GroupMembers::where('group_id', $group->group_id)
+            ->where('is_admin', 1)
+            ->where('status', 'accepted')
+            ->with('user')
+            ->get()
+            ->map(function ($m) {
+                return [
+                    'member_id' => $m->member_id,
+                    'user_id' => $m->user_id,
+                    'name' => $m->user->first_name . ' ' . $m->user->last_name,
+                    'email' => $m->user->email,
+                ];
+            });
+
+        return response()->json(['managers' => $managers]);
     }
 }

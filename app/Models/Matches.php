@@ -27,6 +27,11 @@ class Matches extends Model
         'home_score',
         'away_score',
         'external_id',
+        'last_synced_at',
+    ];
+
+    protected $casts = [
+        'last_synced_at' => 'datetime',
     ];
 
     public function tournament()
@@ -57,5 +62,10 @@ class Matches extends Model
     public function predictions()
     {
         return $this->hasMany('App\Models\Predictions', 'match_id');
+    }
+
+    public function aiPrediction()
+    {
+        return $this->hasOne('App\Models\AiPrediction', 'match_id');
     }
 }

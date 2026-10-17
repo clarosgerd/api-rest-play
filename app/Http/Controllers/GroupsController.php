@@ -157,8 +157,45 @@ class GroupsController extends Controller
 */
     public function update(UpdateGroupsRequest $request, Groups $group)
     {
+        $userId = auth()->id();
+        $isAdmin = auth()->user()->role === 'admin';
+
+        if ($group->creator_id !== $userId && ! $isAdmin) {
+            $isGroupAdmin = GroupMembers::where('group_id', $group->group_id)
+                ->where('user_id', $userId)
+                ->where('is_admin', 1)
+                ->where('status', 'accepted')
+                ->exists();
+
+            if (! $isGroupAdmin) {
+                return response()->json(['message' => 'No tienes permiso para modificar este grupo.'], 403);
+            }
+        }
+
+        $hasMembers = GroupMembers::where('group_id', $group->group_id)
+            ->where('status', 'accepted')
+            ->count() > 1;
+
+        $scoringFields = [
+            'exact_score_points', 'match_result_points', 'correct_goal_points', 'unique_exact_points',
+            'multiplier_dieciseisavos', 'multiplier_octavos', 'multiplier_cuartos',
+            'multiplier_semifinal', 'multiplier_final',
+        ];
+
+        if ($hasMembers) {
+            $data = $request->all();
+            foreach ($scoringFields as $field) {
+                if (array_key_exists($field, $data) && $data[$field] != $group->{$field}) {
+                    return response()->json([
+                        'message' => 'No se pueden modificar las reglas de scoring mientras hay predictores activos.',
+                    ], 422);
+                }
+            }
+        }
 
         $group->update($request->all());
+
+        return new GroupsResource($group->fresh());
     }
 
     /**
@@ -166,9 +203,15 @@ class GroupsController extends Controller
      */
     public function destroy(string $id)
     {
-        $groups = Groups::find($id);
+        $group = Groups::find($id);
+        $userId = auth()->id();
+        $isAdmin = auth()->user()->role === 'admin';
 
-        $groups->delete();
+        if ($group->creator_id !== $userId && ! $isAdmin) {
+            return response()->json(['message' => 'No tienes permiso para eliminar este grupo.'], 403);
+        }
+
+        $group->delete();
 
         return response()->json([
             'message' => 'Groups deleted successfully',
@@ -177,6 +220,13 @@ class GroupsController extends Controller
 
     public function toggleActive(Groups $group)
     {
+        $userId = auth()->id();
+        $isAdmin = auth()->user()->role === 'admin';
+
+        if ($group->creator_id !== $userId && ! $isAdmin) {
+            return response()->json(['message' => 'No tienes permiso para modificar este grupo.'], 403);
+        }
+
         $group->active = $group->active ? 0 : 1;
         $group->save();
 

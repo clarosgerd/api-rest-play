@@ -5,16 +5,13 @@ namespace App\Services;
 use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Log;
 
-class ApiFootballService
+class ApiFootballService extends BaseApiService
 {
-    protected $client;
-
     protected $baseUrl = 'https://v3.football.api-sports.io';
 
     public function __construct()
     {
         $this->client = new Client([
-            'base_uri' => $this->baseUrl,
             'timeout' => 15,
             'headers' => [
                 'x-apisports-key' => config('services.api_football.key', ''),
@@ -78,29 +75,6 @@ class ApiFootballService
 
     public function request(string $method, string $uri, array $queryParams = []): array
     {
-        try {
-            $response = $this->client->request($method, $uri, [
-                'query' => $queryParams,
-            ]);
-
-            $body = json_decode($response->getBody()->getContents(), true);
-
-            return $body ?? [];
-        } catch (\GuzzleHttp\Exception\ClientException $e) {
-            $statusCode = $e->getResponse()->getStatusCode();
-            Log::error("API-Football error: {$statusCode} on {$uri}");
-
-            if ($statusCode === 429) {
-                sleep(60);
-
-                return $this->request($method, $uri, $queryParams);
-            }
-
-            return [];
-        } catch (\Exception $e) {
-            Log::error("API-Football request failed: {$e->getMessage()}");
-
-            return [];
-        }
+        return $this->requestWithRetry($method, $uri, $queryParams);
     }
 }

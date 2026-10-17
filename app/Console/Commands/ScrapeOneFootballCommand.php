@@ -2,46 +2,26 @@
 
 namespace App\Console\Commands;
 
-use App\Services\OneFootballScraper;
 use Illuminate\Console\Command;
 
+/**
+ * NOTE: This command is currently disabled because OneFootballScraper
+ * service class does not exist. To re-enable, create the service at
+ * app/Services/OneFootballScraper.php with a scrapeMatches() method.
+ */
 class ScrapeOneFootballCommand extends Command
 {
-    /**
-     * The name and signature of the console command.
-     *
-     * @var string
-     */
     protected $signature = 'app:scrape-one-football-command';
 
-    /**
-     * The console command description.
-     *
-     * @var string
-     */
-    protected $description = 'Command description';
+    protected $description = 'Scrape match data from OneFootball (DISABLED - service not implemented)';
 
-    /**
-     * Execute the console command.
-     */
     public function handle()
     {
-        $scraper = new OneFootballScraper;
-        $matches = $scraper->scrapeMatches();
+        $this->error('OneFootballScraper service is not implemented.');
+        $this->info('To enable this command, create app/Services/OneFootballScraper.php');
+        $this->info('with a scrapeMatches() method that returns match data.');
 
-        $this->table(
-            ['League', 'Home', 'Score', 'Away', 'Time'],
-            collect($matches)->map(function ($match) {
-                return [
-                    $match['league'],
-                    $match['home_team'],
-                    $match['score'],
-                    $match['away_team'],
-                    $match['time'],
-                ];
-            })->toArray()
-        );
-
-        $this->info(count($matches).' matches scraped.');
+        return 1;
     }
 }
+

@@ -26,7 +26,18 @@ class Team extends Model
         'country_code',
         'active',
         'external_id',
+        'last_synced_at',
+        'created_by',
     ];
+
+    protected $casts = [
+        'last_synced_at' => 'datetime',
+    ];
+
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by', 'user_id');
+    }
 
     public function hometeam()
     {

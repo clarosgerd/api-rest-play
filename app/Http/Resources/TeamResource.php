@@ -23,6 +23,7 @@ class TeamResource extends JsonResource
             'flag_url' => $this->flag_url,
             'country_code' => $this->country_code,
             'active' => $this->active,
+            'created_by' => $this->created_by,
         ];
     }
 }

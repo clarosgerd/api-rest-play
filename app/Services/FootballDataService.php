@@ -5,10 +5,8 @@ namespace App\Services;
 use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Log;
 
-class FootballDataService
+class FootballDataService extends BaseApiService
 {
-    protected $client;
-
     protected $baseUrl = 'https://api.football-data.org/v4';
 
     public function __construct()
@@ -54,29 +52,6 @@ class FootballDataService
 
     private function request(string $method, string $uri, array $queryParams = []): array
     {
-        try {
-            $response = $this->client->request($method, $this->baseUrl . $uri, [
-                'query' => $queryParams,
-            ]);
-
-            $body = json_decode($response->getBody()->getContents(), true);
-
-            return $body ?? [];
-        } catch (\GuzzleHttp\Exception\ClientException $e) {
-            $statusCode = $e->getResponse()->getStatusCode();
-            Log::error("Football API error: {$statusCode} on {$uri}");
-
-            if ($statusCode === 429) {
-                sleep(60);
-
-                return $this->request($method, $uri, $queryParams);
-            }
-
-            return [];
-        } catch (\Exception $e) {
-            Log::error("Football API request failed: {$e->getMessage()}");
-
-            return [];
-        }
+        return $this->requestWithRetry($method, $uri, $queryParams);
     }
 }
