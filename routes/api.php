@@ -278,6 +278,7 @@ Route::group(['prefix' => 'v1'], function () {
 
         // Sync (admin only)
         Route::post('sync', [SyncController::class, 'sync'])->middleware('admin');
+        Route::get('sync/runs/{syncRun}', [SyncController::class, 'runStatus'])->middleware('admin');
 
         // Panel de soporte para super admin (17/10/2026)
         Route::middleware('admin')->prefix('admin')->group(function () {

@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\RunSyncJob;
 use App\Models\GroupMembers;
 use App\Models\Groups;
 use App\Models\Matches;
 use App\Models\Player;
+use App\Models\SyncRun;
 use App\Models\Team;
 use App\Models\Tournament;
 use App\Models\TournamentStage;
@@ -143,6 +145,13 @@ class SyncController extends Controller
         ]);
     }
 
+    /**
+     * Encola el sync en vez de corerlo síncrono (17/10/2026) — con las 13
+     * competiciones del free tier + el sleep(7) entre llamadas para no
+     * pasar el rate-limit, esto tarda 3-5 min: muy por encima del
+     * max_execution_time=60 de la request HTTP. El job real corre vía
+     * RunSyncJob, el frontend pollea el estado con runStatus().
+     */
     public function sync(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -159,76 +168,71 @@ class SyncController extends Controller
         $source = $validated['source'] ?? 'espn';
         $force = (bool) ($validated['force'] ?? false);
 
-        if ($source === 'all') {
-            $exitCode = Artisan::call('sync:all', array_filter([
+        [$command, $args] = match ($source) {
+            'all' => ['sync:all', array_filter([
                 '--type' => $type === 'matches' ? 'fixtures' : $type,
                 '--season' => (string) $season,
                 '--force' => $force ?: null,
-            ]));
-
-            return response()->json([
-                'success' => $exitCode === 0,
-                'message' => 'Full sync (football-data.org + ESPN) completed.',
-                'type' => $type,
-                'season' => $season,
-                'source' => $source,
-                'log' => Artisan::output(),
-            ]);
-        }
-
-        if ($source === 'worldcup') {
-            $exitCode = Artisan::call('worldcup:sync', [
+            ])],
+            'worldcup' => ['worldcup:sync', array_filter([
                 '--type' => $type === 'fixtures' ? 'matches' : $type,
                 '--season' => $season,
-            ]);
-
-            return response()->json([
-                'success' => $exitCode === 0,
-                'message' => "World Cup {$season} sync completed.",
-                'type' => $type,
-                'season' => $season,
-                'source' => $source,
-                'log' => Artisan::output(),
-            ]);
-        }
-
-        if ($source === 'football') {
-            $exitCode = Artisan::call('football:sync', array_filter([
+            ])],
+            'football' => ['football:sync', array_filter([
                 '--type' => $type === 'fixtures' ? 'matches' : $type,
                 '--force' => $force ?: null,
-            ]));
+            ])],
+            default => ['espn:sync', array_filter([
+                '--type' => $type,
+                '--season' => (string) $season,
+                '--force' => $force ?: null,
+                '--league' => $league,
+            ])],
+        };
 
-            return response()->json([
-                'success' => $exitCode === 0,
-                'message' => 'football-data.org sync completed.',
-                'type' => $type,
-                'season' => $season,
-                'source' => $source,
-                'log' => Artisan::output(),
-            ]);
-        }
-
-        $args = array_filter([
-            '--type' => $type,
-            '--season' => (string) $season,
-            '--force' => $force ?: null,
+        $run = SyncRun::create([
+            'source' => $source,
+            'command' => $command,
+            'arguments' => $args,
+            'status' => 'queued',
         ]);
 
-        if ($league) {
-            $args['--league'] = $league;
-        }
-
-        $exitCode = Artisan::call('espn:sync', $args);
+        RunSyncJob::dispatch($run->sync_run_id);
 
         return response()->json([
-            'success' => $exitCode === 0,
-            'message' => $league
-                ? "{$league} sync completed."
-                : "All leagues sync completed.",
+            'run_id' => $run->sync_run_id,
+            'status' => $run->status,
             'type' => $type,
             'season' => $season,
             'source' => $source,
-            'log' => Artisan::output(),
+        ], 202);
+    }
+
+    /**
+     * Polling del resultado de un sync encolado (ver sync()). Mismo shape
+     * (success/message/log) que ya devolvía la llamada síncrona, para no
+     * tener que rediseñar el bloque de resultado del panel.
+     */
+    public function runStatus(SyncRun $syncRun): JsonResponse
+    {
+        $message = match (true) {
+            $syncRun->status === 'failed' => 'La sincronización falló.',
+            ! $syncRun->isFinished() => null,
+            $syncRun->source === 'all' => 'Full sync (football-data.org + ESPN) completed.',
+            $syncRun->source === 'worldcup' => 'World Cup '.($syncRun->arguments['--season'] ?? date('Y')).' sync completed.',
+            $syncRun->source === 'football' => 'football-data.org sync completed.',
+            default => ($syncRun->arguments['--league'] ?? null)
+                ? "{$syncRun->arguments['--league']} sync completed."
+                : 'All leagues sync completed.',
+        };
+
+        return response()->json([
+            'run_id' => $syncRun->sync_run_id,
+            'status' => $syncRun->status,
+            'success' => $syncRun->status === 'completed',
+            'message' => $message,
+            'log' => $syncRun->log,
+            'error' => $syncRun->error,
         ]);
     }
 }
