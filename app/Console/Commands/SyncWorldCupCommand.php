@@ -34,7 +34,12 @@ class SyncWorldCupCommand extends Command
         $this->info("Syncing World Cup {$season} from API-Football...");
 
         $tournament = $this->getOrCreateTournament($season);
-        $tournament->update(['last_synced_at' => now()]);
+        // Hueco corregido (18/10/2026): este comando nunca le asignaba
+        // league_category, por lo que el botón de "sincronizar" por-torneo
+        // (SyncController::syncTournament()) nunca reconocía al Mundial como
+        // sincronizable y devolvía 422. Se backfillea acá por si el
+        // torneo ya existía de antes de este fix.
+        $tournament->update(['last_synced_at' => now(), 'league_category' => 'worldcup']);
 
         match ($type) {
             'all' => $this->syncAll($api, $tournament, $season),
@@ -281,6 +286,7 @@ class SyncWorldCupCommand extends Command
             'end_date' => $season . '-07-19',
             'active' => true,
             'external_id' => self::LEAGUE_ID,
+            'league_category' => 'worldcup',
             'last_synced_at' => now(),
         ]);
     }

@@ -48,4 +48,17 @@ class SyncLeagueCategoryTest extends TestCase
         $this->assertNotNull($tournament);
         $this->assertSame('conmebol', $tournament->league_category);
     }
+
+    public function test_worldcup_sync_marks_the_tournament_as_worldcup(): void
+    {
+        $this->mock(ApiFootballService::class, function ($mock) {
+            $mock->shouldReceive('getTeams')->andReturn(['response' => []]);
+        });
+
+        $this->artisan('worldcup:sync', ['--season' => 2026, '--type' => 'teams'])->assertExitCode(0);
+
+        $tournament = Tournament::where('external_id', 1)->where('season', '2026')->first();
+        $this->assertNotNull($tournament);
+        $this->assertSame('worldcup', $tournament->league_category);
+    }
 }

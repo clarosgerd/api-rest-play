@@ -93,6 +93,27 @@ class TournamentSyncByOwnerTest extends TestCase
             ->assertJsonPath('success', true);
     }
 
+    public function test_owner_can_sync_a_world_cup_tournament(): void
+    {
+        $owner = $this->userWithTier('premium');
+        $tournament = Tournament::create([
+            'name' => 'World Cup 2026', 'season' => '2026', 'country' => 'World', 'country_code' => 'WW',
+            'start_date' => '2026-06-11', 'end_date' => '2026-07-19', 'active' => true,
+            'external_id' => 1, 'league_category' => 'worldcup', 'created_by' => $owner->user_id,
+        ]);
+        Sanctum::actingAs($owner);
+
+        Artisan::shouldReceive('call')
+            ->once()
+            ->with('worldcup:sync', ['--season' => '2026', '--type' => 'matches'])
+            ->andReturn(0);
+        Artisan::shouldReceive('output')->andReturn('ok');
+
+        $this->postJson("/api/v1/tournament/{$tournament->tournament_id}/sync")
+            ->assertOk()
+            ->assertJsonPath('success', true);
+    }
+
     public function test_admin_can_sync_any_tournament(): void
     {
         $admin = $this->userWithTier('free', 'admin');

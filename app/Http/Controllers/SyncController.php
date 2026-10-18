@@ -45,6 +45,10 @@ class SyncController extends Controller
                 '--competition' => (string) $tournament->external_id,
                 '--type' => 'matches',
             ]),
+            'worldcup' => Artisan::call('worldcup:sync', [
+                '--season' => $tournament->season,
+                '--type' => 'matches',
+            ]),
             default => 1,
         };
 
