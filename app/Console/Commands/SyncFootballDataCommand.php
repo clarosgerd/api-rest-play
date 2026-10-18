@@ -21,9 +21,11 @@ class SyncFootballDataCommand extends Command
     protected $description = 'Sync football data from football-data.org (13 free-tier competitions, current seasons)';
 
     /**
-     * Competitions available in the free tier (verified 2026-07).
+     * Competitions available in the free tier (verified 2026-07). Pública
+     * para que SyncController::competitions() la exponga al panel admin sin
+     * duplicar la lista en el frontend.
      */
-    private const FREE_COMPETITIONS = [
+    public const FREE_COMPETITIONS = [
         2021 => 'Premier League',
         2014 => 'Primera Division',
         2002 => 'Bundesliga',

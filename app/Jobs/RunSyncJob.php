@@ -28,6 +28,11 @@ class RunSyncJob implements ShouldQueue
 
     public function handle(): void
     {
+        // sync:all (football:sync + espn:sync) sobre miles de equipos/partidos
+        // ya acumulados excede el memory_limit default de PHP (128M) y mata
+        // el worker entero con un fatal no capturable, no solo este job.
+        ini_set('memory_limit', '512M');
+
         $run = SyncRun::find($this->syncRunId);
 
         if (! $run) {

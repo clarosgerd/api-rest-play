@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Console\Commands\SyncFootballDataCommand;
 use App\Jobs\RunSyncJob;
 use App\Models\GroupMembers;
 use App\Models\Groups;
@@ -146,6 +147,21 @@ class SyncController extends Controller
     }
 
     /**
+     * Lista las competiciones de football-data.org sincronizables (free
+     * tier) para que el panel admin pueda ofrecer "elegir un torneo" en vez
+     * de sincronizar siempre las 13 de una — misma lista que usa
+     * football:sync --competition, sin duplicarla en el frontend.
+     */
+    public function competitions(): JsonResponse
+    {
+        $competitions = collect(SyncFootballDataCommand::FREE_COMPETITIONS)
+            ->map(fn (string $name, int $id) => ['external_id' => $id, 'name' => $name])
+            ->values();
+
+        return response()->json(['competitions' => $competitions]);
+    }
+
+    /**
      * Encola el sync en vez de corerlo síncrono (17/10/2026) — con las 13
      * competiciones del free tier + el sleep(7) entre llamadas para no
      * pasar el rate-limit, esto tarda 3-5 min: muy por encima del
@@ -157,6 +173,7 @@ class SyncController extends Controller
         $validated = $request->validate([
             'type' => 'required|in:all,teams,fixtures,players,standings,matches',
             'league' => 'nullable|string|in:eng.1,esp.1,ger.1,ita.1,fra.1,mex.1,usa.1,bra.1,arg.1,ned.1',
+            'competition' => 'nullable|integer|in:'.implode(',', array_keys(SyncFootballDataCommand::FREE_COMPETITIONS)),
             'season' => 'nullable|integer|min:2020|max:2030',
             'source' => 'nullable|in:espn,worldcup,football,all',
             'force' => 'nullable|boolean',
@@ -164,6 +181,7 @@ class SyncController extends Controller
 
         $type = $validated['type'];
         $league = $validated['league'] ?? null;
+        $competition = $validated['competition'] ?? null;
         $season = $validated['season'] ?? (int) date('Y');
         $source = $validated['source'] ?? 'espn';
         $force = (bool) ($validated['force'] ?? false);
@@ -178,8 +196,12 @@ class SyncController extends Controller
                 '--type' => $type === 'fixtures' ? 'matches' : $type,
                 '--season' => $season,
             ])],
+            // --competition acota a un solo torneo: evita el sync de las 13
+            // competiciones (más lento y lo que hizo que el worker se
+            // quedara sin memoria con sync:all) cuando solo hace falta uno.
             'football' => ['football:sync', array_filter([
                 '--type' => $type === 'fixtures' ? 'matches' : $type,
+                '--competition' => $competition,
                 '--force' => $force ?: null,
             ])],
             default => ['espn:sync', array_filter([
@@ -220,7 +242,9 @@ class SyncController extends Controller
             ! $syncRun->isFinished() => null,
             $syncRun->source === 'all' => 'Full sync (football-data.org + ESPN) completed.',
             $syncRun->source === 'worldcup' => 'World Cup '.($syncRun->arguments['--season'] ?? date('Y')).' sync completed.',
-            $syncRun->source === 'football' => 'football-data.org sync completed.',
+            $syncRun->source === 'football' => ($competitionId = $syncRun->arguments['--competition'] ?? null)
+                ? (SyncFootballDataCommand::FREE_COMPETITIONS[(int) $competitionId] ?? "Competition {$competitionId}").' sync completed.'
+                : 'football-data.org sync completed.',
             default => ($syncRun->arguments['--league'] ?? null)
                 ? "{$syncRun->arguments['--league']} sync completed."
                 : 'All leagues sync completed.',
