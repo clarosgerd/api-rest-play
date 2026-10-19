@@ -4,7 +4,9 @@ namespace App\Actions;
 
 use App\Models\Payment;
 use App\Models\Subscription;
+use App\Notifications\SubscriptionActivatedNotification;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Confirma el pago SIP de una suscripción — llamado por el callback de SIP
@@ -53,6 +55,16 @@ class ConfirmarPagoSuscripcionAction
             'description' => 'Suscripción '.ucfirst($subscription->plan).' confirmada por SIP',
             'paid_at' => $periodStart,
         ]);
+
+        // No puede tirar excepción acá: esta Action la invoca tanto el
+        // webhook de SIP (que debe responder siempre el contrato exacto
+        // {"codigo":"0000",...}) como el polling — un fallo de correo no
+        // debe revertir ni bloquear la confirmación del pago.
+        try {
+            $user->notify(new SubscriptionActivatedNotification($subscription));
+        } catch (\Throwable $e) {
+            Log::error("No se pudo notificar la activación de la suscripción {$subscription->subscription_id}: {$e->getMessage()}");
+        }
 
         return $subscription->refresh();
     }

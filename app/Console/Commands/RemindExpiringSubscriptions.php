@@ -14,10 +14,15 @@ class RemindExpiringSubscriptions extends Command
 
     public function handle(): int
     {
+        // Ventana acotada a UN solo día calendario, exactamente 3 días antes
+        // de vencer (19/10/2026) — antes era "entre ahora y +3 días", que
+        // con este comando agendado a diario reenviaría el mismo recordatorio
+        // 3 veces seguidas a la misma suscripción (día 3, día 2, día 1) hasta
+        // que venciera. Así el cron diario la toca una sola vez.
         $expiringSubscriptions = Subscription::where('status', 'active')
             ->whereBetween('current_period_end', [
-                Carbon::now(),
-                Carbon::now()->addDays(3),
+                Carbon::now()->addDays(3)->startOfDay(),
+                Carbon::now()->addDays(3)->endOfDay(),
             ])
             ->get();
 

@@ -32,3 +32,10 @@ Schedule::command('ai:predict')->hourlyAt(15)->withoutOverlapping();
 // domingo de madrugada para no competir con los syncs normales.
 Schedule::command('kaggle:import --force')->weeklyOn(0, '03:00')->withoutOverlapping();
 Schedule::command('kaggle:compute-elo --incremental')->weeklyOn(0, '03:15')->withoutOverlapping();
+
+// Suscripciones (19/10/2026) — ambos comandos ya existían y funcionan bien,
+// pero nunca estuvieron agendados acá: dependían de ejecución manual.
+// check-expired primero (baja a 'free' lo que ya venció) y remind-expiring
+// después, para no recordatorear algo que este mismo run ya expiró.
+Schedule::command('subscription:check-expired')->dailyAt('07:00');
+Schedule::command('subscription:remind-expiring')->dailyAt('07:05');

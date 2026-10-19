@@ -4,8 +4,10 @@ namespace Tests\Feature;
 
 use App\Models\Subscription;
 use App\Models\User;
+use App\Notifications\SubscriptionActivatedNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 class SipSubscriptionTest extends TestCase
@@ -96,6 +98,7 @@ class SipSubscriptionTest extends TestCase
 
     public function test_sip_callback_activates_subscription(): void
     {
+        Notification::fake();
         $this->fakeSip();
         $this->actingAs($this->user)
             ->postJson('/api/v1/user/subscription/checkout', ['plan' => 'pro', 'billing' => 'monthly']);
@@ -121,6 +124,8 @@ class SipSubscriptionTest extends TestCase
             'amount' => 35,
             'status' => 'succeeded',
         ]);
+
+        Notification::assertSentTo($this->user, SubscriptionActivatedNotification::class);
     }
 
     public function test_sip_callback_is_idempotent(): void
