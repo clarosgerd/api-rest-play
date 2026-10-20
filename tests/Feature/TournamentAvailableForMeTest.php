@@ -30,29 +30,33 @@ class TournamentAvailableForMeTest extends TestCase
     {
         parent::setUp();
 
-        // Demo/privado: sin external_id, sin league_category.
+        // Demo/privado: sin external_id, sin league_category, created_by
+        // null (contenido global, no el torneo privado de un usuario) —
+        // status 'published' (20/10/2026: antes del fix ni se miraba, ahora
+        // hace falta para aparecer en availableForMe()).
         $this->demo = Tournament::create([
             'name' => 'Liga Amistosa Demo', 'season' => '2026', 'country' => 'N/A', 'country_code' => 'NA',
             'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'active' => true,
+            'status' => 'published',
         ]);
 
         $this->conmebol = Tournament::create([
             'name' => 'Copa Libertadores', 'season' => '2026', 'country' => 'CONMEBOL', 'country_code' => 'CO',
             'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'active' => true,
-            'external_id' => 13, 'league_category' => 'conmebol',
+            'external_id' => 13, 'league_category' => 'conmebol', 'status' => 'published',
         ]);
 
         $this->european = Tournament::create([
             'name' => 'Premier League', 'season' => '2026', 'country' => 'England', 'country_code' => 'EN',
             'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'active' => true,
-            'external_id' => 2021, 'league_category' => 'european',
+            'external_id' => 2021, 'league_category' => 'european', 'status' => 'published',
         ]);
 
         // Fuera de temporada: no debe aparecer para NADIE, ni siquiera premium.
         $this->inactive = Tournament::create([
             'name' => 'Liga Vieja', 'season' => '2024', 'country' => 'Spain', 'country_code' => 'ES',
             'start_date' => '2024-01-01', 'end_date' => '2024-12-31', 'active' => false,
-            'external_id' => 2014, 'league_category' => 'european',
+            'external_id' => 2014, 'league_category' => 'european', 'status' => 'published',
         ]);
     }
 
@@ -116,5 +120,61 @@ class TournamentAvailableForMeTest extends TestCase
     public function test_requires_authentication(): void
     {
         $this->getJson('/api/v1/tournament/available-for-me')->assertStatus(401);
+    }
+
+    /**
+     * Publicar un torneo sincronizado (20/10/2026, pedido real del usuario)
+     * — los comandos de sync dejan `status` en 'draft' (default de la
+     * migración) sin tocarlo; antes de este fix availableForMe() ni lo
+     * miraba, así que un torneo recién sincronizado ya aparecía disponible
+     * sin publicación real de por medio.
+     */
+    public function test_draft_synced_tournament_not_visible_until_published(): void
+    {
+        $draft = Tournament::create([
+            'name' => 'Mundial de Clubes', 'season' => '2026', 'country' => 'USA', 'country_code' => 'US',
+            'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'active' => true,
+            'external_id' => 999, 'league_category' => 'conmebol', 'status' => 'draft',
+        ]);
+
+        $this->userWithTier('premium');
+
+        $ids = collect($this->getJson('/api/v1/tournament/available-for-me')->assertOk()->json('data'))
+            ->pluck('tournament_id');
+        $this->assertFalse($ids->contains($draft->tournament_id));
+
+        $draft->update(['status' => 'published']);
+
+        $ids = collect($this->getJson('/api/v1/tournament/available-for-me')->assertOk()->json('data'))
+            ->pluck('tournament_id');
+        $this->assertTrue($ids->contains($draft->tournament_id));
+    }
+
+    /**
+     * Bug real encontrado al implementar el punto de arriba: el torneo
+     * privado de OTRO usuario aparecía en la lista de todos, contradiciendo
+     * "privado = solo por invitación". El propio sigue viéndose.
+     */
+    public function test_other_users_private_tournament_is_hidden_but_own_is_visible(): void
+    {
+        $owner = User::create([
+            'first_name' => 'Owner', 'last_name' => 'Test', 'email' => 'owner@example.com',
+            'password_hash' => bcrypt('secret123'), 'subscription_tier' => 'premium',
+        ]);
+        $ownPrivate = Tournament::create([
+            'name' => 'Liga Barrial', 'season' => '2026', 'country' => 'Bolivia', 'country_code' => 'BO',
+            'start_date' => '2026-01-01', 'end_date' => '2026-12-31', 'active' => true,
+            'status' => 'published', 'created_by' => $owner->user_id,
+        ]);
+
+        Sanctum::actingAs($owner);
+        $ids = collect($this->getJson('/api/v1/tournament/available-for-me')->assertOk()->json('data'))
+            ->pluck('tournament_id');
+        $this->assertTrue($ids->contains($ownPrivate->tournament_id));
+
+        $this->userWithTier('premium');
+        $ids = collect($this->getJson('/api/v1/tournament/available-for-me')->assertOk()->json('data'))
+            ->pluck('tournament_id');
+        $this->assertFalse($ids->contains($ownPrivate->tournament_id));
     }
 }

@@ -14,6 +14,12 @@ class GroupTest extends TestCase
 {
     use RefreshDatabase;
 
+    /**
+     * Crear un grupo propio ahora exige Pro/Premium (20/10/2026, pedido real
+     * del usuario) — free/predictor default pasan a members_per_group=0.
+     * Este test file cubre el CRUD en sí, no el gate (ver
+     * GroupCreationLimitsTest).
+     */
     private function createUser(string $email = 'john@example.com'): User
     {
         return User::create([
@@ -21,6 +27,7 @@ class GroupTest extends TestCase
             'last_name' => 'Doe',
             'email' => $email,
             'password_hash' => bcrypt('secret123'),
+            'subscription_tier' => 'premium',
         ]);
     }
 

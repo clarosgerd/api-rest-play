@@ -256,6 +256,65 @@ class PredictionTest extends TestCase
         $response->assertStatus(422);
     }
 
+    /**
+     * Gap real (20/10/2026, pedido real del usuario): ser miembro del grupo
+     * no alcanza — un invitado solo debe poder predecir partidos del torneo
+     * al que fue invitado, no de cualquier otro torneo que comparta el
+     * group_id del grupo.
+     */
+    public function test_store_prediction_rejects_match_from_a_different_tournament_than_the_group(): void
+    {
+        $this->group->update(['tournament_id' => $this->match->tournament_id]);
+
+        $otherTournament = Tournament::create([
+            'name' => 'Serie A', 'season' => '2025-2026', 'country' => 'Italy', 'country_code' => 'IT',
+            'start_date' => '2025-08-01', 'end_date' => '2026-05-31', 'active' => true,
+        ]);
+        $otherStage = TournamentStage::create([
+            'tournament_id' => $otherTournament->tournament_id, 'name' => 'Regular Season',
+            'stage_order' => 1, 'is_knockout' => false,
+        ]);
+        $otherMatch = Matches::create([
+            'home_team_id' => $this->match->home_team_id, 'away_team_id' => $this->match->away_team_id,
+            'tournament_id' => $otherTournament->tournament_id, 'stage_id' => $otherStage->stage_id,
+            'match_date' => Carbon::now()->addDays(7), 'status' => 'scheduled', 'home_score' => 0, 'away_score' => 0,
+        ]);
+
+        Sanctum::actingAs($this->user);
+
+        $response = $this->postJson('/api/v1/prediction', [
+            'match_id' => $otherMatch->match_id,
+            'group_id' => $this->group->group_id,
+            'predicted_home_score' => 2,
+            'predicted_away_score' => 1,
+            'predicted_result' => 'home_win',
+            'bet_type' => 'exact_score',
+            'confidence' => 8,
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertDatabaseMissing('predictions', ['match_id' => $otherMatch->match_id]);
+    }
+
+    public function test_store_prediction_allows_match_from_the_groups_own_tournament(): void
+    {
+        $this->group->update(['tournament_id' => $this->match->tournament_id]);
+
+        Sanctum::actingAs($this->user);
+
+        $response = $this->postJson('/api/v1/prediction', [
+            'match_id' => $this->match->match_id,
+            'group_id' => $this->group->group_id,
+            'predicted_home_score' => 2,
+            'predicted_away_score' => 1,
+            'predicted_result' => 'home_win',
+            'bet_type' => 'exact_score',
+            'confidence' => 8,
+        ]);
+
+        $response->assertStatus(201);
+    }
+
     public function test_update_prediction(): void
     {
         Sanctum::actingAs($this->user);

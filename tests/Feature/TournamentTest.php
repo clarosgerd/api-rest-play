@@ -12,6 +12,11 @@ class TournamentTest extends TestCase
 {
     use RefreshDatabase;
 
+    /**
+     * Crear torneo privado ahora exige Pro/Premium (20/10/2026, pedido real
+     * del usuario) — free default pasa a tournament_limit=0. Este test file
+     * cubre el CRUD en sí, no el gate (ver TournamentCreationLimitsTest).
+     */
     private function createUser(): User
     {
         return User::create([
@@ -19,6 +24,7 @@ class TournamentTest extends TestCase
             'last_name' => 'Doe',
             'email' => 'john@example.com',
             'password_hash' => bcrypt('secret123'),
+            'subscription_tier' => 'premium',
         ]);
     }
 

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AdminPlanController;
 use App\Http\Controllers\AdminSubscriptionController;
 use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\AdvancementController;
@@ -181,8 +182,13 @@ Route::group(['prefix' => 'v1'], function () {
         Route::delete('team/{team}', [TeamController::class, 'destroy']);
 
         // Groups (write)
-        Route::post('group', [GroupsController::class, 'store']);
-        Route::post('group/first', [GroupsController::class, 'insertFirt']);
+        Route::post('group', [GroupsController::class, 'store'])
+            ->middleware('subscription.limits.groups:members');
+        // insertFirt() es la misma acción (crear un grupo propio) por otro
+        // endpoint — sin el mismo middleware, free/predictor podían esquivar
+        // el gate de arriba llamando a este en su lugar.
+        Route::post('group/first', [GroupsController::class, 'insertFirt'])
+            ->middleware('subscription.limits.groups:members');
         Route::put('group/{group}', [GroupsController::class, 'update']);
         Route::patch('group/{group}/toggle-active', [GroupsController::class, 'toggleActive']);
         Route::get('my-tournament-memberships', [GroupsController::class, 'myTournamentMemberships']);
@@ -292,6 +298,12 @@ Route::group(['prefix' => 'v1'], function () {
             Route::get('subscriptions', [AdminSubscriptionController::class, 'index']);
             Route::post('subscriptions/{subscription}/confirm', [AdminSubscriptionController::class, 'confirm']);
             Route::get('payments', [AdminSubscriptionController::class, 'payments']);
+
+            Route::get('plans', [AdminPlanController::class, 'index']);
+            Route::post('plans', [AdminPlanController::class, 'store']);
+            Route::patch('plans/{plan}', [AdminPlanController::class, 'update']);
+            Route::post('plans/{plan}/promotions', [AdminPlanController::class, 'storePromotion']);
+            Route::patch('plans/{plan}/promotions/{promotion}', [AdminPlanController::class, 'updatePromotion']);
         });
     });
 

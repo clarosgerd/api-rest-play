@@ -72,47 +72,24 @@ class Subscription extends Model
         return $this->plan === 'premium' && $this->isActive();
     }
 
+    /**
+     * Planes administrables por super admin (20/10/2026) — antes hardcodeado
+     * acá mismo, ahora lee de la tabla `plans` (mismo shape de salida para no
+     * tocar los ~6 lugares que ya consumen esto: GenerarPagoSuscripcionAction,
+     * SubscriptionController::plans()/checkout()/webhook, etc). 'free' no
+     * tiene precio, así que no aparece acá — solo los planes pagos.
+     */
     public static function getPlans(): array
     {
-        return [
-            // Predictor (16/10/2026) — plan barato de entrada para invitados
-            // que solo pronostican, no dueños de torneo/grupo.
-            'predictor' => [
-                'monthly' => [
-                    'price' => 1.99,
-                    'price_bob' => 14,
-                    'stripe_price_id' => env('STRIPE_PREDICTOR_MONTHLY_PRICE_ID'),
+        return Plan::where('slug', '!=', 'free')
+            ->where('is_active', true)
+            ->get()
+            ->mapWithKeys(fn (Plan $plan) => [
+                $plan->slug => [
+                    'monthly' => $plan->effectiveBilling('monthly'),
+                    'annual' => $plan->effectiveBilling('annual'),
                 ],
-                'annual' => [
-                    'price' => 14.99,
-                    'price_bob' => 104,
-                    'stripe_price_id' => env('STRIPE_PREDICTOR_ANNUAL_PRICE_ID'),
-                ],
-            ],
-            'pro' => [
-                'monthly' => [
-                    'price' => 4.99,
-                    'price_bob' => 35,
-                    'stripe_price_id' => env('STRIPE_PRO_MONTHLY_PRICE_ID'),
-                ],
-                'annual' => [
-                    'price' => 39.99,
-                    'price_bob' => 279,
-                    'stripe_price_id' => env('STRIPE_PRO_ANNUAL_PRICE_ID'),
-                ],
-            ],
-            'premium' => [
-                'monthly' => [
-                    'price' => 9.99,
-                    'price_bob' => 69,
-                    'stripe_price_id' => env('STRIPE_PREMIUM_MONTHLY_PRICE_ID'),
-                ],
-                'annual' => [
-                    'price' => 79.99,
-                    'price_bob' => 559,
-                    'stripe_price_id' => env('STRIPE_PREMIUM_ANNUAL_PRICE_ID'),
-                ],
-            ],
-        ];
+            ])
+            ->all();
     }
 }

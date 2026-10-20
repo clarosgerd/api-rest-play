@@ -55,7 +55,22 @@ class TournamentController extends Controller
             $allowedLeagues
         ) !== [];
 
-        $query = Tournament::where('active', true);
+        // Publicar un torneo sincronizado (20/10/2026, pedido real del
+        // usuario) — reusa `status`/`publish()` que ya existían sin uso acá:
+        // los comandos de sync dejan el torneo en 'draft' (default de la
+        // migración), así que recién aparece "disponible" cuando un admin lo
+        // publica (`status` pasa a 'published'/'live').
+        $query = Tournament::where('active', true)
+            ->whereIn('status', ['published', 'live']);
+
+        // Bug real encontrado al revisar esto: el torneo privado de un
+        // usuario cualquiera aparecía en la lista de TODOS los demás,
+        // contradiciendo "privado = solo por invitación". Los demo/seed
+        // (created_by null) siguen siendo globales a propósito; solo se
+        // excluye el privado AJENO de otro usuario.
+        $query->where(function ($q) use ($user) {
+            $q->whereNull('created_by')->orWhere('created_by', $user->user_id);
+        });
 
         if (! $unlocksAll) {
             $query->where(function ($q) use ($unlocksConmebol) {

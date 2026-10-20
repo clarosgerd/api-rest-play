@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\GroupMembers;
 use App\Models\GroupPredictions;
+use App\Models\Groups;
 use App\Models\Matches;
 use App\Models\Predictions;
 use Carbon\Carbon;
@@ -80,6 +81,17 @@ class PredictionsController extends Controller
             return response()->json([
                 'message' => 'You are not a member of this group',
             ], 403);
+        }
+
+        // Gap real (20/10/2026): ser miembro del grupo no alcanza — un
+        // invitado solo debe poder predecir partidos del torneo al que fue
+        // invitado, no de cualquier otro torneo que comparta el group_id.
+        $group = Groups::findOrFail($validated['group_id']);
+
+        if ($group->tournament_id && $match->tournament_id !== $group->tournament_id) {
+            return response()->json([
+                'message' => 'This match does not belong to the tournament of this group',
+            ], 422);
         }
 
         // Prevent duplicate predictions per user per match per group

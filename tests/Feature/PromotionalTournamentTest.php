@@ -88,6 +88,13 @@ class PromotionalTournamentTest extends TestCase
             ]);
     }
 
+    /**
+     * El bypass promocional ahora también cubre crear GRUPO (20/10/2026,
+     * mismo criterio que ya existía para crear torneo) — un free sin plan no
+     * podría crear un grupo propio en general (members_per_group=0), pero sí
+     * para un torneo marcado como promocional. Necesita `tournament_id` en el
+     * payload para que CheckGroupLimits lo reconozca.
+     */
     public function test_free_user_can_create_group_for_promotional(): void
     {
         $response = $this->actingAs($this->freeUser)
@@ -95,6 +102,7 @@ class PromotionalTournamentTest extends TestCase
                 'name' => 'Free User Group',
                 'description' => 'Testing promo access',
                 'creator_id' => $this->freeUser->user_id,
+                'tournament_id' => $this->tournament->tournament_id,
                 'is_public' => true,
                 'max_members' => 10,
             ]);

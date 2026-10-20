@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Actions\ConfirmarPagoSuscripcionAction;
 use App\Actions\GenerarPagoSuscripcionAction;
+use App\Models\Plan;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Services\SipService;
@@ -58,22 +59,35 @@ class SubscriptionController extends Controller
      * Precios en Bolivianos vía SIP (16/10/2026) — reemplaza el checkout de
      * Stripe por ahora. El shape de respuesta es el que ya espera el
      * frontend (array `data`, no objeto por clave) — antes nunca matcheaba.
+     *
+     * Planes administrables por super admin (20/10/2026) — antes un array
+     * hardcodeado de 3 slugs fijos, ahora lee los slugs pagos y activos de la
+     * tabla `plans` directamente, así un plan nuevo que el admin crea (ej.
+     * "vip") aparece acá sin deploy de frontend ni de backend. Se agrega
+     * `name` para que el frontend deje de traducir el slug con un mapa
+     * hardcodeado propio.
      */
     public function plans()
     {
         $plans = Subscription::getPlans();
 
-        $data = collect(['predictor', 'pro', 'premium'])->map(function (string $plan) use ($plans) {
-            $limits = (new User(['subscription_tier' => $plan]))->getTierLimits();
+        $data = Plan::where('is_active', true)
+            ->where('slug', '!=', 'free')
+            ->orderBy('sort_order')
+            ->get()
+            ->filter(fn (Plan $plan) => isset($plans[$plan->slug]))
+            ->map(function (Plan $plan) use ($plans) {
+                $limits = (new User(['subscription_tier' => $plan->slug]))->getTierLimits();
 
-            return [
-                'plan' => $plan,
-                'monthly_price' => $plans[$plan]['monthly']['price_bob'],
-                'annual_price' => $plans[$plan]['annual']['price_bob'],
-                'predictions_per_day' => $limits['predictions_per_day'] === -1 ? null : $limits['predictions_per_day'],
-                'tournament_limit' => $limits['tournaments'] === -1 ? null : $limits['tournaments'],
-            ];
-        })->values();
+                return [
+                    'plan' => $plan->slug,
+                    'name' => $plan->name,
+                    'monthly_price' => $plans[$plan->slug]['monthly']['price_bob'],
+                    'annual_price' => $plans[$plan->slug]['annual']['price_bob'],
+                    'predictions_per_day' => $limits['predictions_per_day'] === -1 ? null : $limits['predictions_per_day'],
+                    'tournament_limit' => $limits['tournaments'] === -1 ? null : $limits['tournaments'],
+                ];
+            })->values();
 
         return response()->json([
             'data' => $data,
@@ -88,7 +102,12 @@ class SubscriptionController extends Controller
     public function checkout(Request $request, GenerarPagoSuscripcionAction $action)
     {
         $validated = $request->validate([
-            'plan' => 'required|in:predictor,pro,premium',
+            'plan' => [
+                'required',
+                \Illuminate\Validation\Rule::in(
+                    Plan::where('is_active', true)->where('slug', '!=', 'free')->pluck('slug')
+                ),
+            ],
             'billing' => 'required|in:monthly,annual',
         ]);
 

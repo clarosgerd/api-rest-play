@@ -139,38 +139,27 @@ class User extends Authenticatable
         return true;
     }
 
+    /**
+     * Límites por tier, administrables por super admin (20/10/2026) — antes
+     * hardcodeado acá mismo en un match(), ahora lee de la tabla `plans`
+     * (mismo shape de salida para no tocar los middlewares/controllers que ya
+     * consumen esto). Fallback defensivo a los valores de "free" si por algún
+     * motivo la fila no existe (no debería pasar: la migración de `plans`
+     * siembra las 4 filas base).
+     */
     public function getTierLimits(): array
     {
-        return match ($this->subscription_tier) {
-            // Predictor (16/10/2026) — pensado para invitados que solo
-            // pronostican, no para dueños de torneo/grupo: no puede crear
-            // torneos propios ni ser dueño de un grupo (members_per_group=0
-            // no tiene sentido como "cupo del grupo que posee" porque no
-            // posee ninguno), predicciones ilimitadas porque es su único rol.
-            'predictor' => [
+        $plan = Plan::where('slug', $this->subscription_tier ?? 'free')->first();
+
+        if (! $plan) {
+            return [
                 'tournaments' => 0,
                 'members_per_group' => 0,
-                'predictions_per_day' => -1,
+                'predictions_per_day' => 0,
                 'external_leagues' => [],
-            ],
-            'pro' => [
-                'tournaments' => 5,
-                'members_per_group' => 50,
-                'predictions_per_day' => 20,
-                'external_leagues' => ['conmebol', 'sudamericana', 'south_america'],
-            ],
-            'premium' => [
-                'tournaments' => -1,
-                'members_per_group' => -1,
-                'predictions_per_day' => -1,
-                'external_leagues' => ['all'],
-            ],
-            default => [
-                'tournaments' => 2,
-                'members_per_group' => 10,
-                'predictions_per_day' => 5,
-                'external_leagues' => [],
-            ],
-        };
+            ];
+        }
+
+        return $plan->effectiveLimits();
     }
 }

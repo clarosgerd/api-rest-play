@@ -73,13 +73,19 @@ class SubscriptionTest extends TestCase
         $this->assertContains('all', $limits['external_leagues']);
     }
 
+    /**
+     * Bug real corregido (20/10/2026, pedido del usuario): free podía crear
+     * hasta 2 torneos/10 miembros de grupo — exactamente al revés de "crear
+     * torneo/grupo propio exige Pro/Premium". Free ahora es 0 en todo lo que
+     * implica poseer algo propio.
+     */
     public function test_free_plan_has_basic_limits(): void
     {
         $limits = $this->user->getTierLimits();
 
-        $this->assertEquals(2, $limits['tournaments']);
-        $this->assertEquals(10, $limits['members_per_group']);
-        $this->assertEquals(5, $limits['predictions_per_day']);
+        $this->assertEquals(0, $limits['tournaments']);
+        $this->assertEquals(0, $limits['members_per_group']);
+        $this->assertEquals(0, $limits['predictions_per_day']);
         $this->assertEmpty($limits['external_leagues']);
     }
 

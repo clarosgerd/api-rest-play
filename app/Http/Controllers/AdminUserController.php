@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Plan;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 /**
  * Panel de soporte para super admin (17/10/2026) — gestión de OTROS
@@ -48,7 +50,9 @@ class AdminUserController extends Controller
     {
         $validated = $request->validate([
             'role' => 'sometimes|nullable|string',
-            'subscription_tier' => 'sometimes|in:free,predictor,pro,premium',
+            // Planes administrables (20/10/2026) — acepta cualquier slug que
+            // exista en `plans`, no solo los 4 originales hardcodeados.
+            'subscription_tier' => ['sometimes', Rule::in(Plan::pluck('slug'))],
             'subscription_expires_at' => 'sometimes|nullable|date',
         ]);
 
