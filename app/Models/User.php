@@ -61,6 +61,12 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password_hash' => 'hashed',
             'suspended_at' => 'datetime',
+            // Bug real encontrado (20/10/2026): sin este cast,
+            // isSubscriptionActive() rompía con "Call to a member function
+            // isPast() on string" para cualquier usuario con
+            // subscription_expires_at seteado (trial/suscripción vieja) —
+            // GET /user/subscription (la pantalla de Planes) tiraba 500.
+            'subscription_expires_at' => 'datetime',
         ];
     }
 

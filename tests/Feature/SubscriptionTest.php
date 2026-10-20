@@ -34,6 +34,22 @@ class SubscriptionTest extends TestCase
             ]);
     }
 
+    /**
+     * Bug real encontrado en UAT/local (20/10/2026): sin el cast datetime en
+     * subscription_expires_at, isSubscriptionActive() rompía con "Call to a
+     * member function isPast() on string" para cualquier usuario pago con
+     * fecha de expiración seteada — esta pantalla (origen de /user/subscription)
+     * tiraba 500 en vez de mostrar el estado.
+     */
+    public function test_user_with_expiration_date_can_view_subscription_status_without_crashing(): void
+    {
+        $this->user->update(['subscription_tier' => 'pro', 'subscription_expires_at' => now()->addMonth()]);
+
+        $response = $this->actingAs($this->user)->getJson('/api/v1/user/subscription');
+
+        $response->assertOk()->assertJson(['tier' => 'pro', 'is_active' => true]);
+    }
+
     public function test_user_can_view_plans(): void
     {
         $response = $this->actingAs($this->user)
