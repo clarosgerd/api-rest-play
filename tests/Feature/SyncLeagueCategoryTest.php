@@ -40,6 +40,7 @@ class SyncLeagueCategoryTest extends TestCase
         $this->mock(ApiFootballService::class, function ($mock) {
             $mock->shouldReceive('getTeams')->andReturn(['response' => []]);
             $mock->shouldReceive('getFixtures')->andReturn(['response' => []]);
+            $mock->shouldReceive('getStandings')->andReturn(['response' => []]);
         });
 
         $this->artisan('conmebol:sync', ['--competition' => 'libertadores'])->assertExitCode(0);

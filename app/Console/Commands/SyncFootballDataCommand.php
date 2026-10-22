@@ -5,6 +5,8 @@ namespace App\Console\Commands;
 use App\Models\Matches;
 use App\Models\Team;
 use App\Models\Tournament;
+use App\Models\TournamentGroup;
+use App\Models\TournamentGroupTeam;
 use App\Models\TournamentStage;
 use App\Services\FootballDataService;
 use Carbon\Carbon;
@@ -313,9 +315,14 @@ class SyncFootballDataCommand extends Command
                 continue;
             }
 
-            // Ensure teams from standings exist in DB
+            // Ensure teams from standings exist in DB, and persist the group
+            // (grupos/fases/equipos, 22/10/2026) — antes esta respuesta solo
+            // se usaba para crear equipos faltantes; la tabla de posiciones
+            // por grupo (ya disponible en $group['table']) se descartaba.
             $now = now();
             foreach ($data['standings'] as $group) {
+                $teamsByExternalId = [];
+
                 foreach ($group['table'] as $row) {
                     $teamExternalId = $row['team']['id'] ?? null;
                     if (! $teamExternalId) {
@@ -324,7 +331,7 @@ class SyncFootballDataCommand extends Command
 
                     $team = Team::where('external_id', $teamExternalId)->first();
                     if (! $team) {
-                        Team::create([
+                        $team = Team::create([
                             'name' => $row['team']['name'] ?? $row['team']['shortName'] ?? "Team {$teamExternalId}",
                             'country' => $comp->country,
                             'country_code' => $comp->country_code,
@@ -336,11 +343,85 @@ class SyncFootballDataCommand extends Command
                             'last_synced_at' => $now,
                         ]);
                     }
+
+                    $teamsByExternalId[$teamExternalId] = $team;
                 }
+
+                $this->persistGroupStandings($comp, $group, $teamsByExternalId);
             }
 
             $this->info("  Standings: {$comp->name} OK");
         }
+    }
+
+    /**
+     * Persiste un grupo de la fase de grupos (y su tabla de posiciones) desde
+     * la respuesta de /standings de football-data.org. Solo TOTAL (no
+     * HOME/AWAY) y solo si el stage ya existe — si todavía no se
+     * sincronizaron partidos de esa fase, no hay stage_id donde colgar el
+     * grupo, así que se salta con un warning en vez de crearlo a ciegas.
+     *
+     * @param array<string, Team> $teamsByExternalId
+     */
+    private function persistGroupStandings(Tournament $comp, array $group, array $teamsByExternalId): void
+    {
+        $groupName = $group['group'] ?? null;
+        if (! $groupName || ($group['type'] ?? 'TOTAL') !== 'TOTAL') {
+            return;
+        }
+
+        $stageName = $group['stage'] ?? 'GROUP_STAGE';
+        $stage = TournamentStage::where('tournament_id', $comp->tournament_id)
+            ->where('name', $stageName)
+            ->first();
+
+        if (! $stage) {
+            $this->warn("    Sin stage '{$stageName}' todavía para {$comp->name} — grupo '{$groupName}' no se guarda hasta que corra el sync de partidos.");
+
+            return;
+        }
+
+        $tournamentGroup = TournamentGroup::updateOrCreate(
+            ['stage_id' => $stage->stage_id, 'name' => $groupName],
+            ['status' => 'approved', 'group_order' => $this->groupOrder($groupName)]
+        );
+
+        foreach ($group['table'] as $row) {
+            $teamExternalId = $row['team']['id'] ?? null;
+            $team = $teamExternalId ? ($teamsByExternalId[$teamExternalId] ?? null) : null;
+            if (! $team) {
+                continue;
+            }
+
+            TournamentGroupTeam::updateOrCreate(
+                ['group_id' => $tournamentGroup->group_id, 'team_id' => $team->team_id],
+                [
+                    'position_final' => $row['position'] ?? null,
+                    'points' => $row['points'] ?? 0,
+                    'goal_diff' => $row['goalDifference'] ?? 0,
+                    'goals_for' => $row['goalsFor'] ?? 0,
+                    'goals_against' => $row['goalsAgainst'] ?? 0,
+                    'matches_played' => $row['playedGames'] ?? 0,
+                    'wins' => $row['won'] ?? 0,
+                    'draws' => $row['draw'] ?? 0,
+                    'losses' => $row['lost'] ?? 0,
+                ]
+            );
+        }
+    }
+
+    /**
+     * "GROUP_A" -> 1, "GROUP_B" -> 2, etc. Si no matchea ese patrón (torneos
+     * sin letra, poco común), se deja 1 — group_order es solo para ordenar
+     * la UI, no identifica al grupo (eso lo hace 'name').
+     */
+    private function groupOrder(string $groupName): int
+    {
+        if (preg_match('/([A-Z])$/', $groupName, $m)) {
+            return ord($m[1]) - ord('A') + 1;
+        }
+
+        return 1;
     }
 
     /**

@@ -6,6 +6,8 @@ use App\Models\Matches;
 use App\Models\Player;
 use App\Models\Team;
 use App\Models\Tournament;
+use App\Models\TournamentGroup;
+use App\Models\TournamentGroupTeam;
 use App\Models\TournamentStage;
 use App\Services\ApiFootballService;
 use Carbon\Carbon;
@@ -56,6 +58,8 @@ class SyncConmebolCommand extends Command
             $synced = $this->syncCompetition($apiFootball, $config, $season);
 
             $this->info("Synced {$synced} matches for {$config['name']}.");
+
+            $this->syncGroupStandings($apiFootball, $config, $season);
 
             if ($this->option('topscorers')) {
                 $this->syncTopScorers($apiFootball, $config, $season);
@@ -130,6 +134,117 @@ class SyncConmebolCommand extends Command
 
         $this->info("  Synced {$synced} top scorers for {$config['name']} {$season}.");
         return $synced;
+    }
+
+    /**
+     * Grupos/standings reales de Libertadores/Sudamericana (22/10/2026) —
+     * dejado armado para cuando haya plan de pago de API-Football: hoy el
+     * plan free devuelve `errors.plan` para la temporada actual y solo
+     * responde para 2022-2024 (confirmado a mano contra la API real). El
+     * mismo problema de "se pedía y se tiraba" que tenía el sync de
+     * football-data.org (ver SyncFootballDataCommand::persistGroupStandings)
+     * nunca llegó a existir acá porque este comando no pedía standings en
+     * absoluto; ahora sí los pide y, si la respuesta trae datos, los
+     * persiste en tournamentgroups/tournamentgroupteams.
+     */
+    private function syncGroupStandings(ApiFootballService $api, array $config, string $season): int
+    {
+        $tournament = Tournament::where('external_id', $config['api_football_id'])->first();
+        if (! $tournament) {
+            $this->warn('  Standings: tournament not found. Run the regular sync first.');
+
+            return 0;
+        }
+
+        $response = $api->getStandings($config['api_football_id'], (int) $season);
+
+        if (! empty($response['errors']['plan'])) {
+            $this->warn("  Standings: {$response['errors']['plan']}");
+
+            return 0;
+        }
+
+        $groups = $response['response'][0]['league']['standings'] ?? [];
+        if (empty($groups)) {
+            $this->warn('  No group standings returned by API-Football.');
+
+            return 0;
+        }
+
+        // Stage dedicado a los grupos (no es el mismo que usan los partidos,
+        // que acá se guardan por jornada: "Group Stage - 1", "Group Stage -
+        // 2", ...). Mismo criterio de este comando: getOrCreateStage() ya se
+        // llama libremente por cada round sin exigir que exista antes.
+        $stage = $this->getOrCreateStage($tournament, 'Group Stage');
+        $now = now();
+        $groupsSynced = 0;
+
+        foreach ($groups as $groupRows) {
+            $groupName = $groupRows[0]['group'] ?? null;
+            if (! $groupName) {
+                continue;
+            }
+
+            $tournamentGroup = TournamentGroup::updateOrCreate(
+                ['stage_id' => $stage->stage_id, 'name' => $groupName],
+                ['status' => 'approved', 'group_order' => $this->groupOrder($groupName)]
+            );
+            $groupsSynced++;
+
+            foreach ($groupRows as $row) {
+                $teamExternalId = $row['team']['id'] ?? null;
+                if (! $teamExternalId) {
+                    continue;
+                }
+
+                $team = Team::where('external_id', $teamExternalId)->first();
+                if (! $team) {
+                    $team = Team::create([
+                        'name' => $row['team']['name'] ?? "Team {$teamExternalId}",
+                        'country' => 'CONMEBOL',
+                        'country_code' => 'CONMEBOL',
+                        'league' => $config['name'],
+                        'logo_url' => $row['team']['logo'] ?? null,
+                        'flag_url' => null,
+                        'active' => true,
+                        'external_id' => $teamExternalId,
+                        'last_synced_at' => $now,
+                    ]);
+                }
+
+                TournamentGroupTeam::updateOrCreate(
+                    ['group_id' => $tournamentGroup->group_id, 'team_id' => $team->team_id],
+                    [
+                        'position_final' => $row['rank'] ?? null,
+                        'points' => $row['points'] ?? 0,
+                        'goal_diff' => $row['goalsDiff'] ?? 0,
+                        'goals_for' => $row['all']['goals']['for'] ?? 0,
+                        'goals_against' => $row['all']['goals']['against'] ?? 0,
+                        'matches_played' => $row['all']['played'] ?? 0,
+                        'wins' => $row['all']['win'] ?? 0,
+                        'draws' => $row['all']['draw'] ?? 0,
+                        'losses' => $row['all']['lose'] ?? 0,
+                    ]
+                );
+            }
+        }
+
+        $this->info("  Synced {$groupsSynced} groups.");
+
+        return $groupsSynced;
+    }
+
+    /**
+     * "Group A" -> 1, "Group B" -> 2, etc. Solo ordena la UI, no identifica
+     * al grupo (eso lo hace 'name').
+     */
+    private function groupOrder(string $groupName): int
+    {
+        if (preg_match('/([A-Z])$/', $groupName, $m)) {
+            return ord($m[1]) - ord('A') + 1;
+        }
+
+        return 1;
     }
 
     private function syncCompetition(
